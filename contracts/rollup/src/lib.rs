@@ -12,7 +12,6 @@ pub enum DataKey {
     WithdrawalAllowances(Address),
     Fees,
     TotalWithdrawable,
-    ReentrancyGuard,
 }
 
 #[contract]
@@ -62,9 +61,6 @@ impl RollupContract {
         env.storage()
             .instance()
             .set(&DataKey::TotalWithdrawable, &0i128);
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyGuard, &false);
     }
 
     pub fn deposit(env: Env, user: Address, amount: i128) {
@@ -167,21 +163,7 @@ impl RollupContract {
     }
 
     pub fn withdraw(env: Env, user: Address) {
-        // Require authorization from the user to withdraw their funds
         user.require_auth();
-
-        // Reentrancy guard
-        let guard: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::ReentrancyGuard)
-            .unwrap();
-        if guard {
-            panic!("Reentrant call");
-        }
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyGuard, &true);
 
         let key = DataKey::WithdrawalAllowances(user.clone());
         let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
@@ -207,27 +189,10 @@ impl RollupContract {
         token_client.transfer(&env.current_contract_address(), &user, &amount);
         env.events()
             .publish_event(&WithdrawalEvent { user, amount });
-
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyGuard, &false);
     }
 
     #[only_owner]
     pub fn collect_fees(env: Env, to: Address) {
-        // Reentrancy guard
-        let guard: bool = env
-            .storage()
-            .instance()
-            .get(&DataKey::ReentrancyGuard)
-            .unwrap();
-        if guard {
-            panic!("Reentrant call");
-        }
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyGuard, &true);
-
         let fees: i128 = env.storage().instance().get(&DataKey::Fees).unwrap();
         if fees <= 0 {
             panic!("No fees to collect");
@@ -251,10 +216,6 @@ impl RollupContract {
         token_client.transfer(&env.current_contract_address(), &to, &fees);
         env.events()
             .publish_event(&FeesCollectedEvent { to, amount: fees });
-
-        env.storage()
-            .instance()
-            .set(&DataKey::ReentrancyGuard, &false);
     }
 
     #[only_owner]

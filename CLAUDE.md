@@ -53,4 +53,3 @@ The `RollupContract` manages deposits, withdrawals, and fee collection for a Lay
 - `WithdrawalAllowances(Address)`: Per-user withdrawal allowances (persistent storage)
 - `Fees`: Accumulated fees available for collection
 - `TotalWithdrawable`: Total amount reserved for withdrawals + fees
-- `ReentrancyGuard`: Prevents reentrant calls to withdraw/collect_fees
