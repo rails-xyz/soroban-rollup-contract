@@ -665,17 +665,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "hello-world"
-version = "0.0.0"
-dependencies = [
- "soroban-sdk",
- "stellar-access",
- "stellar-contract-utils",
- "stellar-macros",
- "stellar-tokens",
-]
-
-[[package]]
 name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1028,6 +1017,17 @@ checksum = "f8dd2a808d456c4a54e300a23e9f5a67e122c3024119acbfd73e3bf664491cb2"
 dependencies = [
  "hmac",
  "subtle",
+]
+
+[[package]]
+name = "rollup-contract"
+version = "0.0.0"
+dependencies = [
+ "soroban-sdk",
+ "stellar-access",
+ "stellar-contract-utils",
+ "stellar-macros",
+ "stellar-tokens",
 ]
 
 [[package]]
