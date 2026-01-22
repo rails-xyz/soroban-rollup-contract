@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec};
 
 use stellar_access::ownable;
 use stellar_macros::only_owner;
@@ -18,21 +18,21 @@ pub enum DataKey {
 #[contract]
 pub struct RollupContract;
 
-#[contracttype]
+#[contractevent]
 #[derive(Clone)]
 pub struct DepositEvent {
     pub user: Address,
     pub amount: i128,
 }
 
-#[contracttype]
+#[contractevent]
 #[derive(Clone)]
 pub struct WithdrawalEvent {
     pub user: Address,
     pub amount: i128,
 }
 
-#[contracttype]
+#[contractevent]
 #[derive(Clone)]
 pub struct NewBlockEvent {
     pub new_block_hash: BytesN<32>,
@@ -40,7 +40,7 @@ pub struct NewBlockEvent {
     pub new_fees: i128,
 }
 
-#[contracttype]
+#[contractevent]
 #[derive(Clone)]
 pub struct FeesCollectedEvent {
     pub to: Address,
@@ -79,8 +79,7 @@ impl RollupContract {
             .unwrap();
         let token_client = soroban_sdk::token::TokenClient::new(&env, &collateral_token);
         token_client.transfer(&user, &env.current_contract_address(), &amount);
-        env.events()
-            .publish(("Deposit",), DepositEvent { user, amount });
+        env.events().publish_event(&DepositEvent { user, amount });
     }
 
     #[only_owner]
@@ -160,14 +159,11 @@ impl RollupContract {
         env.storage()
             .instance()
             .set(&DataKey::LatestBlockHash, &new_block_hash);
-        env.events().publish(
-            ("NewBlock",),
-            NewBlockEvent {
-                new_block_hash,
-                new_withdrawal_sum,
-                new_fees,
-            },
-        );
+        env.events().publish_event(&NewBlockEvent {
+            new_block_hash,
+            new_withdrawal_sum,
+            new_fees,
+        });
     }
 
     pub fn withdraw(env: Env, user: Address) {
@@ -207,7 +203,7 @@ impl RollupContract {
         let token_client = soroban_sdk::token::TokenClient::new(&env, &collateral_token);
         token_client.transfer(&env.current_contract_address(), &user, &amount);
         env.events()
-            .publish(("Withdrawal",), WithdrawalEvent { user, amount });
+            .publish_event(&WithdrawalEvent { user, amount });
 
         env.storage()
             .instance()
@@ -251,7 +247,7 @@ impl RollupContract {
         let token_client = soroban_sdk::token::TokenClient::new(&env, &collateral_token);
         token_client.transfer(&env.current_contract_address(), &to, &fees);
         env.events()
-            .publish(("FeesCollected",), FeesCollectedEvent { to, amount: fees });
+            .publish_event(&FeesCollectedEvent { to, amount: fees });
 
         env.storage()
             .instance()
