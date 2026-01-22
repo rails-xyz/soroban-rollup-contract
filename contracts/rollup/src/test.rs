@@ -2,32 +2,35 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    token::TokenClient,
+    testutils::Address as _,
+    token::{StellarAssetClient, TokenClient},
     vec, Address, BytesN, Env,
 };
 
-fn create_token_contract<'a>(env: &Env, admin: &Address) -> TokenClient<'a> {
-    TokenClient::new(env, &env.register_stellar_asset_contract(admin.clone()))
+fn create_token_contract<'a>(env: &Env, admin: &Address) -> (TokenClient<'a>, StellarAssetClient<'a>) {
+    let address = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    (TokenClient::new(env, &address), StellarAssetClient::new(env, &address))
 }
 
-fn deploy_fixture(env: &Env) -> (Address, Address, Address, TokenClient, RollupContractClient) {
+fn deploy_fixture(env: &Env) -> (Address, Address, Address, TokenClient<'_>, RollupContractClient<'_>) {
+    env.mock_all_auths();
+
     let owner = Address::generate(env);
     let other_account = Address::generate(env);
     let fee_account = Address::generate(env);
 
     let token_admin = Address::generate(env);
-    let token_client = create_token_contract(env, &token_admin);
+    let (token_client, token_admin_client) = create_token_contract(env, &token_admin);
 
-    let contract_id = env.register(RollupContract, ());
+    let contract_id = env.register(
+        RollupContract,
+        (&token_client.address, &owner),
+    );
     let client = RollupContractClient::new(env, &contract_id);
 
-    client.initialize(&token_client.address, &owner);
-
-    // Mint some tokens to other_account
-    token_client.mint(&other_account, &20_0000000); // 20 tokens with 7 decimals? Wait, Stellar assets have 7 decimals usually.
-
-    // Actually, Soroban tokens can have different decimals, but for simplicity, assume 7.
+    // Mint some tokens to other_account and owner
+    token_admin_client.mint(&other_account, &20_0000000);
+    token_admin_client.mint(&owner, &20_0000000);
 
     (owner, other_account, fee_account, token_client, client)
 }
@@ -36,14 +39,16 @@ fn deploy_fixture(env: &Env) -> (Address, Address, Address, TokenClient, RollupC
 fn test_deployment() {
     let env = Env::default();
     let (_owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
-    // Just check it deploys
-    assert!(client.owner() == _owner);
+    // Just check it deploys - verify initial state
+    assert_eq!(client.latest_block_hash(), BytesN::from_array(&env, &[0; 32]));
+    assert_eq!(client.fees(), 0);
+    assert_eq!(client.total_withdrawable(), 0);
 }
 
 #[test]
 fn test_deposit() {
     let env = Env::default();
-    let (owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
+    let (_owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_0000000; // 10 tokens
 
@@ -57,21 +62,18 @@ fn test_deposit() {
 }
 
 #[test]
+#[should_panic(expected = "Deposit amount must be greater than 0")]
 fn test_deposit_zero_amount() {
     let env = Env::default();
     let (_owner, other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
 
-    // This should panic
-    let result = std::panic::catch_unwind(|| {
-        client.deposit(&other_account, &0);
-    });
-    assert!(result.is_err());
+    client.deposit(&other_account, &0);
 }
 
 #[test]
 fn test_rollup() {
     let env = Env::default();
-    let (owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
+    let (_owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_0000000;
     let withdrawal_amount = 5_0000000;
@@ -98,24 +100,32 @@ fn test_rollup() {
 }
 
 #[test]
+#[should_panic]
 fn test_rollup_non_owner() {
     let env = Env::default();
-    let (_owner, other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+    // Don't use deploy_fixture since it calls mock_all_auths
+    // Setup without mocking auth to test authorization failure
+    let owner = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = create_token_contract(&env, &token_admin);
+
+    let contract_id = env.register(
+        RollupContract,
+        (&token_client.address, &owner),
+    );
+    let client = RollupContractClient::new(&env, &contract_id);
 
     let old_root = client.latest_block_hash();
     let new_root = BytesN::from_array(&env, &[1; 32]);
 
-    // This should fail auth
-    let result = std::panic::catch_unwind(|| {
-        client.rollup(&old_root, &new_root, &vec![&env], &vec![&env], &0, &0);
-    });
-    assert!(result.is_err());
+    // This should fail auth - no mock_all_auths called, so owner auth will fail
+    client.rollup(&old_root, &new_root, &vec![&env], &vec![&env], &0, &0);
 }
 
 #[test]
 fn test_withdraw() {
     let env = Env::default();
-    let (owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
+    let (_owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_0000000;
     let withdrawal_amount = 5_0000000;
@@ -138,7 +148,7 @@ fn test_withdraw() {
 
     // Now withdraw
     let initial_balance = token_client.balance(&other_account);
-    client.withdraw();
+    client.withdraw(&other_account);
     let final_balance = token_client.balance(&other_account);
     assert_eq!(final_balance, initial_balance + withdrawal_amount);
 }

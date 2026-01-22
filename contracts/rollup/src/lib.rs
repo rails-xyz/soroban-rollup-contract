@@ -167,6 +167,9 @@ impl RollupContract {
     }
 
     pub fn withdraw(env: Env, user: Address) {
+        // Require authorization from the user to withdraw their funds
+        user.require_auth();
+
         // Reentrancy guard
         let guard: bool = env
             .storage()
