@@ -28,13 +28,13 @@ The `RollupContract` enables:
 ## Build Commands
 
 ```bash
-# Build all contracts for production deployment
+# Build all contracts for deployment
 stellar contract build
 # or
 cargo build --target wasm32v1-none --release
 
-# Further optimize the built wasm
-stellar contract optimize --wasm target/wasm32v1-none/release/{name_of_production_build}.wasm
+# Further optimize the wasm to reduce size
+stellar contract build --optimize
 
 # Build with debug assertions enabled (for logging)
 cargo build --target wasm32v1-none --release-with-logs
