@@ -32,7 +32,7 @@ This is a Soroban smart contract for a rollup system on the Stellar network. The
 
 ### Contract Overview
 
-The `RollupContract` manages deposits, withdrawals, and fee collection for a Layer 2 rollup:
+The `RollupContract` manages deposits, withdrawals, and fee collection for a Layer 1 rollup:
 
 - **Deposits**: Users deposit collateral tokens into the contract
 - **Rollup**: Owner-only function that processes batches of withdrawal allowances by verifying block hashes and updating user allowances

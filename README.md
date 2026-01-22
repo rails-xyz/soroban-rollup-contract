@@ -1,22 +1,56 @@
-# Soroban Project
+# Soroban Rollup Contract
+
+A Soroban smart contract for managing deposits, withdrawals, and fee collection for a Layer 1 rollup on the Stellar network.
+
+## Overview
+
+The `RollupContract` enables:
+
+- **Deposits**: Users deposit collateral tokens into the contract
+- **Rollup**: Owner-only function that processes batches of withdrawal allowances by verifying block hashes and updating user allowances
+- **Withdrawals**: Users claim their allowances after they've been processed in a rollup
+- **Fee Collection**: Owner collects accumulated fees
 
 ## Project Structure
-
-This repository uses the recommended structure for a Soroban project:
 
 ```text
 .
 ├── contracts
-│   └── hello_world
-│       ├── src
-│       │   ├── lib.rs
-│       │   └── test.rs
-│       └── Cargo.toml
-├── Cargo.toml
+│   └── rollup
+│       ├── src
+│       │   ├── lib.rs    # Main contract implementation
+│       │   └── test.rs   # Unit tests
+│       └── Cargo.toml
+├── Cargo.toml            # Workspace configuration
 └── README.md
 ```
 
-- New Soroban contracts can be put in `contracts`, each in their own directory. There is already a `hello_world` contract in there to get you started.
-- If you initialized this project with any other example contracts via `--with-example`, those contracts will be in the `contracts` directory as well.
-- Contracts should have their own `Cargo.toml` files that rely on the top-level `Cargo.toml` workspace for their dependencies.
-- Frontend libraries can be added to the top-level directory as well. If you initialized this project with a frontend template via `--frontend-template` you will have those files already included.
+## Build Commands
+
+```bash
+# Build all contracts for production deployment
+stellar contract build
+# or
+cargo build --target wasm32v1-none --release
+
+# Further optimize the built wasm
+stellar contract optimize --wasm target/wasm32v1-none/release/{name_of_production_build}.wasm
+
+# Build with debug assertions enabled (for logging)
+cargo build --target wasm32v1-none --release-with-logs
+
+# Run tests
+cargo test
+
+# Run a specific test
+cargo test test_deposit
+
+# Check code without building
+cargo check
+```
+
+## Dependencies
+
+- `soroban-sdk`: Core Soroban SDK (v23)
+- `stellar-access`: Provides `ownable` module and `#[only_owner]` macro for access control
+- `stellar-macros`: Procedural macros for contract development
