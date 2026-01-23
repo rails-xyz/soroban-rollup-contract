@@ -1,11 +1,12 @@
-#![cfg(test)]
+extern crate std;
 
-use super::*;
 use soroban_sdk::{
     testutils::Address as _,
     token::{StellarAssetClient, TokenClient},
     vec, Address, BytesN, Env,
 };
+
+use crate::contract::{RollupContract, RollupContractClient};
 
 fn create_token_contract<'a>(
     env: &Env,
