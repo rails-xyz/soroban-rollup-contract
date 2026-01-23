@@ -2,7 +2,7 @@ extern crate std;
 
 use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
-use crate::contract::{MockUsdcToken, MockUsdcTokenClient};
+use super::contract::{MockUsdcToken, MockUsdcTokenClient};
 
 #[test]
 fn test_mint_and_transfer() {

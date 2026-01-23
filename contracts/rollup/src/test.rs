@@ -6,7 +6,7 @@ use soroban_sdk::{
     vec, Address, BytesN, Env,
 };
 
-use crate::contract::{RollupContract, RollupContractClient};
+use super::contract::{RollupContract, RollupContractClient};
 
 fn create_token_contract<'a>(
     env: &Env,
