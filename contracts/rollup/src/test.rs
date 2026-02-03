@@ -238,3 +238,83 @@ fn test_withdraw_verifies_auth() {
         "auth should be required from the withdrawing user"
     );
 }
+
+#[test]
+fn test_owner() {
+    let env = Env::default();
+    let (owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+
+    // Verify owner is set correctly
+    let current_owner = client.owner();
+    assert_eq!(current_owner, Some(owner));
+}
+
+#[test]
+fn test_transfer_and_accept_ownership() {
+    let env = Env::default();
+
+    // Setup without mock_all_auths to properly test ownership transfer
+    let owner = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = create_token_contract(&env, &token_admin);
+
+    let contract_id = env.register(RollupContract, (&token_client.address, &owner));
+    let client = RollupContractClient::new(&env, &contract_id);
+
+    // Verify initial owner
+    assert_eq!(client.owner(), Some(owner.clone()));
+
+    // Use allowing_non_root_auth to handle nested auth in the ownable library
+    env.mock_all_auths_allowing_non_root_auth();
+
+    // Transfer ownership (2-step process)
+    let live_until_ledger = 1000u32;
+    client.transfer_ownership(&new_owner, &live_until_ledger);
+
+    // Owner should still be the original owner until accepted
+    assert_eq!(client.owner(), Some(owner.clone()));
+
+    // New owner accepts ownership
+    client.accept_ownership();
+
+    // Verify ownership has been transferred
+    assert_eq!(client.owner(), Some(new_owner));
+}
+
+#[test]
+#[should_panic]
+fn test_transfer_ownership_non_owner() {
+    let env = Env::default();
+    // Setup without mocking auth to test authorization failure
+    let owner = Address::generate(&env);
+    let new_owner = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = create_token_contract(&env, &token_admin);
+
+    let contract_id = env.register(RollupContract, (&token_client.address, &owner));
+    let client = RollupContractClient::new(&env, &contract_id);
+
+    // This should fail - no mock_all_auths, so non-owner cannot transfer
+    client.transfer_ownership(&new_owner, &1000u32);
+}
+
+#[test]
+#[should_panic]
+fn test_accept_ownership_without_pending_transfer() {
+    let env = Env::default();
+    let (_owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+
+    // Try to accept ownership without a pending transfer - should panic
+    client.accept_ownership();
+}
+
+#[test]
+#[should_panic(expected = "Renouncing ownership is disabled")]
+fn test_renounce_ownership_disabled() {
+    let env = Env::default();
+    let (_owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+
+    // This should panic with our custom message
+    client.renounce_ownership();
+}

@@ -238,7 +238,21 @@ impl RollupContract {
         panic!("Renouncing ownership is disabled");
     }
 
-    // View functions - owner() is provided by OpenZeppelin Ownable trait
+    /// Initiates a 2-step ownership transfer. The new owner must call `accept_ownership` to complete.
+    /// Note: Auth is enforced internally by the ownable library.
+    pub fn transfer_ownership(env: Env, new_owner: Address, live_until_ledger: u32) {
+        ownable::transfer_ownership(&env, &new_owner, live_until_ledger);
+    }
+
+    pub fn accept_ownership(env: Env) {
+        ownable::accept_ownership(&env);
+    }
+
+    // View functions
+    pub fn owner(env: Env) -> Option<Address> {
+        ownable::get_owner(&env)
+    }
+
     pub fn latest_block_hash(env: Env) -> BytesN<32> {
         env.storage()
             .instance()
@@ -262,5 +276,15 @@ impl RollupContract {
             .instance()
             .get(&DataKey::TotalWithdrawable)
             .unwrap()
+    }
+
+    pub fn collateral_balance(env: Env) -> i128 {
+        let collateral_token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::CollateralToken)
+            .unwrap();
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &collateral_token);
+        token_client.balance(&env.current_contract_address())
     }
 }
