@@ -79,7 +79,7 @@ fn test_deposit() {
 }
 
 #[test]
-#[should_panic(expected = "Deposit amount must be greater than 0")]
+#[should_panic(expected = "Error(Contract, #1)")]
 fn test_deposit_zero_amount() {
     let env = Env::default();
     let (_owner, other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
@@ -310,11 +310,11 @@ fn test_accept_ownership_without_pending_transfer() {
 }
 
 #[test]
-#[should_panic(expected = "Renouncing ownership is disabled")]
+#[should_panic(expected = "Error(Contract, #61)")]
 fn test_renounce_ownership_disabled() {
     let env = Env::default();
     let (_owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
 
-    // This should panic with our custom message
+    // This should panic with ContractError::RenounceOwnershipDisabled (61)
     client.renounce_ownership();
 }

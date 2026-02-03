@@ -1,4 +1,6 @@
-use soroban_sdk::{contract, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec,
+};
 
 use stellar_access::ownable;
 use stellar_macros::only_owner;
@@ -11,6 +13,36 @@ pub enum DataKey {
     WithdrawalAllowances(Address),
     Fees,
     TotalWithdrawable,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    // Deposit errors: 1-10
+    DepositAmountMustBePositive = 1,
+
+    // Rollup errors: 11-30
+    NewBlockHashEmpty = 11,
+    OldBlockHashMismatch = 12,
+    BlockHashUnchanged = 13,
+    ArrayLengthMismatch = 14,
+    ArrayLengthExceedsLimit = 15,
+    WithdrawalSumMismatch = 16,
+    InsufficientBalance = 17,
+
+    // Withdrawal errors: 31-40
+    NoWithdrawalAllowance = 31,
+
+    // Fee errors: 41-50
+    NoFeesToCollect = 41,
+
+    // Recovery errors: 51-60
+    CannotRecoverCollateral = 51,
+    RecoverAmountMustBePositive = 52,
+
+    // Ownership errors: 61-70
+    RenounceOwnershipDisabled = 61,
 }
 
 #[contract]
@@ -62,10 +94,10 @@ impl RollupContract {
             .set(&DataKey::TotalWithdrawable, &0i128);
     }
 
-    pub fn deposit(env: Env, user: Address, amount: i128) {
+    pub fn deposit(env: Env, user: Address, amount: i128) -> Result<(), ContractError> {
         user.require_auth();
         if amount <= 0 {
-            panic!("Deposit amount must be greater than 0");
+            return Err(ContractError::DepositAmountMustBePositive);
         }
         let collateral_token: Address = env
             .storage()
@@ -75,6 +107,7 @@ impl RollupContract {
         let token_client = soroban_sdk::token::TokenClient::new(&env, &collateral_token);
         token_client.transfer(&user, &env.current_contract_address(), &amount);
         env.events().publish_event(&DepositEvent { user, amount });
+        Ok(())
     }
 
     #[only_owner]
@@ -86,9 +119,9 @@ impl RollupContract {
         new_withdrawal_amounts: Vec<i128>,
         new_withdrawal_sum: i128,
         new_fees: i128,
-    ) {
+    ) -> Result<(), ContractError> {
         if new_block_hash == BytesN::from_array(&env, &[0; 32]) {
-            panic!("New block hash cannot be empty");
+            return Err(ContractError::NewBlockHashEmpty);
         }
         let latest_block_hash: BytesN<32> = env
             .storage()
@@ -96,16 +129,16 @@ impl RollupContract {
             .get(&DataKey::LatestBlockHash)
             .unwrap();
         if old_block_hash != latest_block_hash {
-            panic!("Old block hash does not match the latest block hash");
+            return Err(ContractError::OldBlockHashMismatch);
         }
         if new_block_hash == old_block_hash {
-            panic!("New block hash cannot be the same as the old block hash");
+            return Err(ContractError::BlockHashUnchanged);
         }
         if new_withdrawal_addresses.len() != new_withdrawal_amounts.len() {
-            panic!("Arrays must have the same length");
+            return Err(ContractError::ArrayLengthMismatch);
         }
         if new_withdrawal_addresses.len() > 100 {
-            panic!("Array length exceeds gas limit safety bounds");
+            return Err(ContractError::ArrayLengthExceedsLimit);
         }
 
         let mut calculated_withdrawal_sum = 0i128;
@@ -118,7 +151,7 @@ impl RollupContract {
             calculated_withdrawal_sum += allowance;
         }
         if calculated_withdrawal_sum != new_withdrawal_sum {
-            panic!("Calculated withdrawal sum does not match the provided sum");
+            return Err(ContractError::WithdrawalSumMismatch);
         }
 
         let net_new_withdrawable = new_withdrawal_sum + new_fees;
@@ -135,7 +168,7 @@ impl RollupContract {
             .get(&DataKey::TotalWithdrawable)
             .unwrap();
         if net_new_withdrawable > balance - total_withdrawable {
-            panic!("Insufficient balance");
+            return Err(ContractError::InsufficientBalance);
         }
 
         let current_total: i128 = env
@@ -159,15 +192,16 @@ impl RollupContract {
             new_withdrawal_sum,
             new_fees,
         });
+        Ok(())
     }
 
-    pub fn withdraw(env: Env, user: Address) {
+    pub fn withdraw(env: Env, user: Address) -> Result<(), ContractError> {
         user.require_auth();
 
         let key = DataKey::WithdrawalAllowances(user.clone());
         let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         if amount <= 0 {
-            panic!("No withdrawal allowance available");
+            return Err(ContractError::NoWithdrawalAllowance);
         }
 
         env.storage().persistent().set(&key, &0i128);
@@ -188,13 +222,14 @@ impl RollupContract {
         token_client.transfer(&env.current_contract_address(), &user, &amount);
         env.events()
             .publish_event(&WithdrawalEvent { user, amount });
+        Ok(())
     }
 
     #[only_owner]
-    pub fn collect_fees(env: Env, to: Address) {
+    pub fn collect_fees(env: Env, to: Address) -> Result<(), ContractError> {
         let fees: i128 = env.storage().instance().get(&DataKey::Fees).unwrap();
         if fees <= 0 {
-            panic!("No fees to collect");
+            return Err(ContractError::NoFeesToCollect);
         }
 
         env.storage().instance().set(&DataKey::Fees, &0i128);
@@ -215,27 +250,34 @@ impl RollupContract {
         token_client.transfer(&env.current_contract_address(), &to, &fees);
         env.events()
             .publish_event(&FeesCollectedEvent { to, amount: fees });
+        Ok(())
     }
 
     #[only_owner]
-    pub fn recover(env: Env, token_address: Address, to: Address, amount: i128) {
+    pub fn recover(
+        env: Env,
+        token_address: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
         let collateral_token: Address = env
             .storage()
             .instance()
             .get(&DataKey::CollateralToken)
             .unwrap();
         if token_address == collateral_token {
-            panic!("Cannot recover collateral token");
+            return Err(ContractError::CannotRecoverCollateral);
         }
         if amount <= 0 {
-            panic!("Amount must be greater than 0");
+            return Err(ContractError::RecoverAmountMustBePositive);
         }
         let token_client = soroban_sdk::token::TokenClient::new(&env, &token_address);
         token_client.transfer(&env.current_contract_address(), &to, &amount);
+        Ok(())
     }
 
-    pub fn renounce_ownership(_env: Env) {
-        panic!("Renouncing ownership is disabled");
+    pub fn renounce_ownership(_env: Env) -> Result<(), ContractError> {
+        Err(ContractError::RenounceOwnershipDisabled)
     }
 
     /// Initiates a 2-step ownership transfer. The new owner must call `accept_ownership` to complete.
