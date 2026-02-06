@@ -49,6 +49,20 @@ cargo test test_deposit
 cargo check
 ```
 
+## Environment Setup
+
+We have a TESTNET Stellar Node live on staging. You can access this node with stellar cli by adding a network configuration:
+
+```
+stellar network add staging --url https://xdr.fungible.xyz --passphrase "Test SDF Network ; September 2022"
+```
+
+Then you can use the `--network staging` flag with stellar cli commands to interact with the staging network:
+
+```
+stellar contract deploy --network staging
+```
+
 ## Dependencies
 
 - `soroban-sdk`: Core Soroban SDK (v23)
