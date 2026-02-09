@@ -47,6 +47,10 @@ cargo test test_deposit
 
 # Check code without building
 cargo check
+
+# Generate bindings
+stellar contract bindings rust --wasm ./target/wasm32v1-none/release/rollup_contract.wasm --out ./bindings/rollup_contract.rs
+
 ```
 
 ## Environment Setup
