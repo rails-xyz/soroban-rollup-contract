@@ -1,9 +1,11 @@
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, Address, BytesN, Env, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
+    BytesN, Env, Vec,
 };
+use stellar_contract_utils::upgradeable::UpgradeableInternal;
 
 use stellar_access::ownable;
-use stellar_macros::only_owner;
+use stellar_macros::{only_owner, Upgradeable};
 
 #[contracttype]
 #[derive(Clone)]
@@ -43,8 +45,10 @@ pub enum ContractError {
 
     // Ownership errors: 61-70
     RenounceOwnershipDisabled = 61,
+    Unauthorized = 62,
 }
 
+#[derive(Upgradeable)]
 #[contract]
 pub struct RollupContract;
 
@@ -328,5 +332,15 @@ impl RollupContract {
             .unwrap();
         let token_client = soroban_sdk::token::TokenClient::new(&env, &collateral_token);
         token_client.balance(&env.current_contract_address())
+    }
+}
+
+impl UpgradeableInternal for RollupContract {
+    fn _require_auth(e: &Env, operator: &Address) {
+        operator.require_auth();
+        let owner = ownable::get_owner(e).unwrap();
+        if *operator != owner {
+            panic_with_error!(e, ContractError::Unauthorized);
+        }
     }
 }

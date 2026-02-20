@@ -318,3 +318,31 @@ fn test_renounce_ownership_disabled() {
     // This should panic with ContractError::RenounceOwnershipDisabled (61)
     client.renounce_ownership();
 }
+
+#[test]
+#[should_panic]
+fn test_upgrade_non_owner_panics() {
+    let env = Env::default();
+    let (owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+    let non_owner = Address::generate(&env);
+    assert_ne!(owner, non_owner);
+
+    let new_wasm_hash = BytesN::from_array(&env, &[7; 32]);
+    client.upgrade(&new_wasm_hash, &non_owner);
+}
+
+#[test]
+#[should_panic]
+fn test_upgrade_requires_operator_auth() {
+    let env = Env::default();
+
+    // Setup without auth mocking so owner authorization is actually enforced.
+    let owner = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = create_token_contract(&env, &token_admin);
+    let contract_id = env.register(RollupContract, (&token_client.address, &owner));
+    let client = RollupContractClient::new(&env, &contract_id);
+
+    let new_wasm_hash = BytesN::from_array(&env, &[9; 32]);
+    client.upgrade(&new_wasm_hash, &owner);
+}

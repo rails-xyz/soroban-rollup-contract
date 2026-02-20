@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/rollup_contract.wasm",
-    sha256 = "8270f91c58b6331ae65ea6065100ba1f972d2f3a5dfe067ce7815639f97b77a8"
+    sha256 = "529457c9640292eb0386510a1b3cef4cfc50289f3a40a383fcf914d5cb542099"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -27,6 +27,11 @@ pub trait Contract {
         to: soroban_sdk::Address,
         amount: i128,
     ) -> Result<(), ContractError>;
+    fn upgrade(
+        env: soroban_sdk::Env,
+        new_wasm_hash: soroban_sdk::BytesN<32>,
+        operator: soroban_sdk::Address,
+    );
     fn withdraw(env: soroban_sdk::Env, user: soroban_sdk::Address) -> Result<(), ContractError>;
     fn collect_fees(env: soroban_sdk::Env, to: soroban_sdk::Address) -> Result<(), ContractError>;
     fn __constructor(
@@ -77,6 +82,23 @@ pub enum OwnableStorageKey {
     Owner,
     PendingOwner,
 }
+#[soroban_sdk::contracttype(export = false)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum MerkleDistributorStorageKey {
+    Root,
+    Claimed(u32),
+}
+#[soroban_sdk::contracttype(export = false)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum Rounding {
+    Floor,
+    Ceil,
+}
+#[soroban_sdk::contracttype(export = false)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum PausableStorageKey {
+    Paused,
+}
 #[soroban_sdk::contracterror(export = false)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ContractError {
@@ -120,6 +142,38 @@ pub enum OwnableError {
     OwnerNotSet = 2100,
     TransferInProgress = 2101,
     OwnerAlreadySet = 2102,
+}
+#[soroban_sdk::contracterror(export = false)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum UpgradeableError {
+    MigrationNotAllowed = 1100,
+}
+#[soroban_sdk::contracterror(export = false)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum MerkleDistributorError {
+    RootNotSet = 1300,
+    IndexAlreadyClaimed = 1301,
+    InvalidProof = 1302,
+}
+#[soroban_sdk::contracterror(export = false)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum SorobanFixedPointError {
+    ZeroDenominator = 1500,
+    PhantomOverflow = 1501,
+    ResultOverflow = 1502,
+}
+#[soroban_sdk::contracterror(export = false)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum CryptoError {
+    MerkleProofOutOfBounds = 1400,
+    MerkleIndexOutOfBounds = 1401,
+    HasherEmptyState = 1402,
+}
+#[soroban_sdk::contracterror(export = false)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub enum PausableError {
+    EnforcedPause = 1000,
+    ExpectedPause = 1001,
 }
 #[soroban_sdk::contractevent(topics = ["deposit_event"], export = false)]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -210,3 +264,19 @@ pub struct OwnershipRenounced {
 pub struct OwnershipTransferCompleted {
     pub new_owner: soroban_sdk::Address,
 }
+#[soroban_sdk::contractevent(topics = ["set_root"], export = false)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SetRoot {
+    pub root: soroban_sdk::Bytes,
+}
+#[soroban_sdk::contractevent(topics = ["set_claimed"], export = false)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct SetClaimed {
+    pub index: soroban_sdk::Val,
+}
+#[soroban_sdk::contractevent(topics = ["paused"], export = false)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Paused {}
+#[soroban_sdk::contractevent(topics = ["unpaused"], export = false)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct Unpaused {}
