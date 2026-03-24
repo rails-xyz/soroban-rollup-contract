@@ -4,17 +4,17 @@ use stellar_macros::only_owner;
 use stellar_tokens::fungible::Base;
 
 #[contract]
-pub struct MockUsdcToken;
+pub struct MockUsdtToken;
 
 #[contractimpl]
-impl MockUsdcToken {
+impl MockUsdtToken {
     pub fn __constructor(env: Env, admin: Address) {
         ownable::set_owner(&env, &admin);
         Base::set_metadata(
             &env,
             6,
-            String::from_str(&env, "Mock USDC"),
-            String::from_str(&env, "USDC"),
+            String::from_str(&env, "Mock USDT"),
+            String::from_str(&env, "USDT"),
         );
     }
 
