@@ -1,0 +1,18 @@
+[package]
+name = "managed-liquidity-vault"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+stellar-access = "0.5.0"
+stellar-contract-utils = "0.5.0"
+stellar-macros = "0.5.0"
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

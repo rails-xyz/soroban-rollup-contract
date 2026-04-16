@@ -56,6 +56,15 @@ Examples:
 
 This can be modeled directly in Soroban by requiring both addresses to authorize outflow methods.
 
+Upgrade authority is intentionally separate from these business operations.
+
+- `Owner` should be a dedicated governance address, not the `Exchange` or the `FundingPartner`
+- `Owner` should only be used for contract upgrade
+- `Owner` should be treated as immutable from the vault contract's point of view
+- ownership rotation should not be exposed through the vault contract API
+
+In practice, the recommended setup is for `Owner` to be a separate governance multisig address controlled jointly off-chain by the exchange and funding partner.
+
 ### Loss Waterfall
 
 The intended loss waterfall in this design is:
@@ -114,7 +123,8 @@ In practice, this means:
 
 - `Exchange` proposes and executes exchange-side actions,
 - `FundingPartner` approves `XLM` outflows,
-- and the contract enforces dual authorization only where principal leaves the vault.
+- the contract enforces dual authorization only where principal leaves the vault,
+- and `Owner` remains a separate upgrade-only governance authority.
 
 ## Managed Flow
 
@@ -228,6 +238,11 @@ These are not strictly required, but they help with off-chain reconciliation and
 
 ## State Interpretation
 
+- `Owner`
+  - immutable governance owner used only for contract upgrade
+  - not used for normal vault operations
+  - should be a separate governance address rather than either business party directly
+
 - `PartnerPrincipalXlm`
   - total `XLM` principal contributed by the funding partner and still tracked as partner-owned principal inside the vault.
 
@@ -281,7 +296,7 @@ For this design, the simplest governance pattern is:
 
 #### `__constructor(xlm_token, yield_token, exchange, funding_partner, owner)`
 
-Initializes the contract with the two business parties.
+Initializes the contract with the two business parties and the separate upgrade-only governance owner.
 
 ### Funding Methods
 
