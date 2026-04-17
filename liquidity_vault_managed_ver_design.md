@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document sketches a liquidity vault between Stellar and Rails. It highlights how main risks are going to be managed such as FX risk between `XLM` and `USDT0`. It also proposes how withdrawal of principal funding will be managed with multi-sig and automatic yield deposited by the exchange.
+This document sketches a liquidity vault between Stellar and Rails. It highlights how main risks are managed, including FX risk between `XLM` and `USDT0`. It also proposes how principal withdrawal is managed with dual approval and how yield is recorded and paid by the exchange.
 
 ## Core Assumptions
 
@@ -25,14 +25,7 @@ The funding partner is agreeing that the deposited `XLM` may be used by the exch
 
 Because of that, the exchange can adjust how much of the vault is reserved as collateral. This is expected to be a periodic operational adjustment based on exchange rate moves and exchange credit needs.
 
-Dual-signing is reserved for actions where `XLM` actually leaves the vault.
-
-Examples:
-
-- withdrawing partner principal,
-- and any other direct `XLM` transfer out of the vault.
-
-This is modeled directly in Soroban by requiring both addresses to authorize outflow methods.
+Dual-signing is reserved for partner-principal withdrawal. This is modeled directly in Soroban by requiring both addresses to authorize the partner-principal withdrawal method.
 
 Upgrade authority is intentionally separate from these business operations.
 
@@ -48,7 +41,7 @@ In practice, the recommended setup is for `Owner` to be a separate governance mu
 The intended collateral-maintenance flow in this design is:
 
 1. the exchange monitors the effective collateral value off-chain based on the current `XLM/USDT0` rate and its internal credit exposure,
-   - the “internal credit exposure” is the total amount of `USDT0` the Exchange uses for market making. This will come in the form of an internal credit/deposit to the market making account, and will not be visible in the rollup contract. The visibility will be on the vault smart contract.
+   - the “internal credit exposure” is the total amount of `USDT0` the exchange uses for market making. This exists in the exchange's internal ledger, not in the vault contract. The vault only sees the resulting `set_reserve(...)` target and related audit metadata.
 2. the exchange periodically updates the vault's reserved `XLM` target through `set_reserve(...)`,
 3. if more `XLM` principal is needed to keep the desired collateral coverage, the funding partner deposits more `XLM` into the vault,
 4. and this top-up is only expected to happen before collateral becomes insufficient, for example when reserved collateral approaches an agreed utilization threshold such as `80%` of principal.
@@ -60,7 +53,7 @@ This design still keeps the two assets separate:
 - `XLM` is the principal/collateral asset.
 - `USDT0` is the yield asset.
 
-Note that the collateral in the exchange in `USDT0`
+The exchange may use the reserved `XLM` only as the basis for off-chain internal `USDT0` credit. The vault itself remains an `XLM` principal vault plus a separate `USDT0` yield bucket.
 
 ## Smart Contract Architecture
 
@@ -84,16 +77,24 @@ Note that the collateral in the exchange in `USDT0`
 
 ```mermaid
 flowchart LR
-    Partner(("Funding Partner")) -->|"deposit XLM"| Vault["Liquidity Vault Contract"]
-    Exchange(("Exchange / Sole MM")) -->|"set_reserve(target_reserved_xlm, reference_credit_usdt0, exchange_rate)"| Vault
-    Exchange -->|"pay yield in USDT0"| Vault
-    Exchange -.->|"uses reserved XLM as basis for internal credit and market making"| ExchangeFlow("MM / Trading")
-    Vault -->|"partner-only yield withdrawal"| Partner
+    Partner(("Funding Partner"))
+    Vault["Liquidity Vault Contract"]
+    Exchange(("Exchange / Sole MM"))
+    Ops["Off-chain Exchange Trading"]
+    Approval["Dual Approval (Exchange + FundingPartner)"]
 
-    Exchange -->|"*request XLM payout only if it can no longer cover realized loss"| Approval("Dual Approval")
-    Partner -->|"*approve XLM payout"| Approval
-    Approval -->|"*request_loss_payout(...)"| Vault
-    Vault -->|"*transfer XLM"| Exchange
+    Partner ~~~ Vault
+    Vault ~~~ Exchange
+
+    Partner -->|"deposit_partner(XLM)"| Vault
+    Exchange -->|"set_reserve(...)"| Vault
+    Exchange -.->|"internal USDT0 credit and market making"| Ops
+    Exchange -->|"record_yield_settlement(...) pay_yield(USDT0)"| Vault
+    Vault -->|"withdraw_partner_yield(USDT0)"| Partner
+    Partner -->|"co-sign withdraw_partner_principal(...)"| Approval
+    Exchange -->|"co-sign withdraw_partner_principal(...)"| Approval
+    Approval -->|"withdraw_partner_principal(XLM)"| Vault
+    Vault -->|"transfer partner principal (XLM)"| Partner
 
     classDef party fill:#e8f1ff,stroke:#3366cc,color:#102a43;
     classDef vault fill:#eef7ee,stroke:#2f855a,color:#173d2d;
@@ -102,21 +103,19 @@ flowchart LR
 
     class Partner,Exchange party;
     class Vault vault;
-    class ExchangeFlow offchain;
+    class Ops offchain;
     class Approval approval;
 
     linkStyle 0 stroke:#2b6cb0,stroke-width:2px;
     linkStyle 1 stroke:#2b6cb0,stroke-width:2px;
-    linkStyle 2 stroke:#2f855a,stroke-width:2px;
-    linkStyle 3 stroke:#718096,stroke-width:2px,stroke-dasharray: 6 4;
+    linkStyle 2 stroke:#718096,stroke-width:2px,stroke-dasharray: 6 4;
+    linkStyle 3 stroke:#2f855a,stroke-width:2px;
     linkStyle 4 stroke:#2f855a,stroke-width:2px;
     linkStyle 5 stroke:#dd6b20,stroke-width:2.5px;
     linkStyle 6 stroke:#dd6b20,stroke-width:2.5px;
-    linkStyle 7 stroke:#c53030,stroke-width:2.5px;
-    linkStyle 8 stroke:#c53030,stroke-width:2.5px;
+    linkStyle 7 stroke:#dd6b20,stroke-width:2.5px;
+    linkStyle 8 stroke:#dd6b20,stroke-width:2.5px;
 ```
-
-Color guide: blue \= principal/collateral setup, green \= yield flow, gray \= off-chain trading, orange/red \= exceptional loss reimbursement flow
 
 Key points shown in the diagram:
 
@@ -124,9 +123,9 @@ Key points shown in the diagram:
 - the only MM is the exchange,
 - the exchange controls how much deposited `XLM` is reserved as collateral,
 - the exchange covers realized losses first using its own resources,
-- `XLM` leaves the vault only when both parties approve the outflow,
+- the exchange does not receive `XLM` reimbursement from the,
+- and partner principal can leave the vault only when both parties approve the withdrawal,
 - and yield in `USDT0` can only be withdrawn by the funding partner.
--
 
 ### State Model
 
@@ -149,9 +148,8 @@ Because there is only one depositor and one MM, the state can be collapsed to gl
 #### Optional Audit State
 
 - `LastSetReserveExchangeRate`
-- `LastSetReserveReferenceCreditUsdt0`
+- `LastSetReserveCredit`
 - `LastSettlementMemoHash`
-- `VaultStatus`
 
 These are not strictly required, but they help with off-chain reconciliation and audit trails.
 
@@ -166,7 +164,7 @@ These are not strictly required, but they help with off-chain reconciliation and
   - total `XLM` principal contributed by the funding partner and still tracked as partner-owned principal inside the vault.
 
 - `FreePrincipalXlm`
-  - `XLM` not currently reserved for exchange collateral and not already claimable by the exchange.
+  - `XLM` not currently reserved for exchange collateral.
 
 - `ReservedForExchangeXlm`
   - `XLM` currently reserved as collateral backing the exchange's internal credit.
@@ -179,7 +177,7 @@ These are not strictly required, but they help with off-chain reconciliation and
 
 ### Core Invariants
 
-- `FreePrincipalXlm + ReservedForExchangeXlm <= PartnerPrincipalXlm`
+- `FreePrincipalXlm + ReservedForExchangeXlm = PartnerPrincipalXlm`
 - `CollectedYieldUsdt0 >= 0`
 - `YieldDebtUsdt0 >= 0`
 - `CollectedYieldUsdt0` only increases when `USDT0` is actually transferred in
@@ -191,7 +189,7 @@ For this design, the simplest governance pattern is:
 
 - partner-only calls for pure funding actions,
 - exchange-only calls for collateral management and settlement accounting,
-- and dual-sign calls for `XLM` outflows.
+- and dual-sign calls for partner principal withdrawal.
 
 #### Partner-Only
 
@@ -288,11 +286,10 @@ This is safe as an exchange-only method because it can only improve partner posi
 
 ```rust
 pub enum DataKey {
-    Owner,
-    Exchange,
-    FundingPartner,
     XlmToken,
     YieldToken,
+    Exchange,
+    FundingPartner,
     PartnerPrincipalXlm,
     FreePrincipalXlm,
     ReservedForExchangeXlm,
@@ -300,21 +297,21 @@ pub enum DataKey {
     YieldDebtUsdt0,
     LatestSettlementEpoch,
     LastSetReserveExchangeRate,
-    LastSetReserveReferenceCreditUsdt0,
+    LastSetReserveCredit,
     LastSettlementMemoHash,
-    VaultStatus,
 }
 ```
+
+`Owner` is still part of the overall design, but in the current contract it is managed through the ownership helper rather than this local `DataKey` enum.
 
 ## Example Events
 
 - `PartnerDeposit`
-- `PartnerPrincipalWithdrawn`
+- `PartnerPrincipalOut`
 - `ReserveSet`
 - `YieldSettlementRecorded`
 - `YieldPaid`
 - `PartnerYieldWithdrawn`
-- `PayoutSent`
 
 ## Concrete Examples
 
@@ -481,7 +478,7 @@ Important observation:
 
 ### Example 4: Partner Tops Up Principal When More Collateral Is Needed
 
-Start from the reserved state after Example 4\.
+Start from the state after Example 3\.
 
 Assume:
 
