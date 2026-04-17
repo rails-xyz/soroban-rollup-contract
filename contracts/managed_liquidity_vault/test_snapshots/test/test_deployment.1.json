@@ -99,6 +99,7 @@
     [],
     [],
     [],
+    [],
     []
   ],
   "ledger": {
@@ -374,6 +375,16 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "LastReserveReferenceHash"
+                            }
+                          ]
+                        },
+                        "val": "void"
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "LastSetReserveCredit"
                             }
                           ]
@@ -398,13 +409,11 @@
                         "key": {
                           "vec": [
                             {
-                              "symbol": "LastSettlementMemoHash"
+                              "symbol": "LastYieldSettlementReferenceHash"
                             }
                           ]
                         },
-                        "val": {
-                          "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
-                        }
+                        "val": "void"
                       },
                       {
                         "key": {

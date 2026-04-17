@@ -168,6 +168,8 @@
     [],
     [],
     [],
+    [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -702,6 +704,16 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "LastReserveReferenceHash"
+                            }
+                          ]
+                        },
+                        "val": "void"
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "LastSetReserveCredit"
                             }
                           ]
@@ -726,7 +738,7 @@
                         "key": {
                           "vec": [
                             {
-                              "symbol": "LastSettlementMemoHash"
+                              "symbol": "LastYieldSettlementReferenceHash"
                             }
                           ]
                         },

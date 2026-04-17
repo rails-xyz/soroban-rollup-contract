@@ -21,7 +21,8 @@ pub enum DataKey {
     LatestSettlementEpoch,
     LastSetReserveExchangeRate,
     LastSetReserveCredit,
-    LastSettlementMemoHash,
+    LastReserveReferenceHash,
+    LastYieldSettlementReferenceHash,
 }
 
 #[contracterror]
@@ -38,8 +39,6 @@ pub enum ContractError {
     YieldSettlementAmountsMustBeNonNegative = 8,
     YieldPaidExceedsDebtAndCurrentDue = 9,
     SettlementEpochMustIncrease = 10,
-    LossPayoutAmountMustBePositive = 11,
-    LossPayoutExceedsReserve = 12,
     AuditValuesMustBeNonNegative = 13,
     RenounceOwnershipDisabled = 14,
     Unauthorized = 15,
@@ -68,7 +67,7 @@ pub struct ReserveSetEvt {
     pub target_reserved_xlm: i128,
     pub reference_credit_usdt0: i128,
     pub exchange_rate: i128,
-    pub memo_hash: BytesN<32>,
+    pub reference_hash: Option<BytesN<32>>,
 }
 
 #[contractevent]
@@ -77,7 +76,7 @@ pub struct YieldSettlementEvt {
     pub epoch_id: u64,
     pub yield_due_usdt0: i128,
     pub yield_paid_usdt0: i128,
-    pub memo_hash: BytesN<32>,
+    pub reference_hash: Option<BytesN<32>>,
 }
 
 #[contractevent]
@@ -91,14 +90,6 @@ pub struct YieldPaidEvt {
 pub struct PartnerYieldOutEvt {
     pub to: Address,
     pub amount: i128,
-}
-
-#[contractevent]
-#[derive(Clone)]
-pub struct LossPayoutEvt {
-    pub to: Address,
-    pub amount: i128,
-    pub memo_hash: BytesN<32>,
 }
 
 #[contractimpl]
@@ -125,9 +116,10 @@ impl ManagedLiquidityVaultContract {
         instance.set(&DataKey::LatestSettlementEpoch, &0u64);
         instance.set(&DataKey::LastSetReserveExchangeRate, &0i128);
         instance.set(&DataKey::LastSetReserveCredit, &0i128);
+        instance.set(&DataKey::LastReserveReferenceHash, &Option::<BytesN<32>>::None);
         instance.set(
-            &DataKey::LastSettlementMemoHash,
-            &BytesN::from_array(&env, &[0; 32]),
+            &DataKey::LastYieldSettlementReferenceHash,
+            &Option::<BytesN<32>>::None,
         );
     }
 
@@ -194,7 +186,7 @@ impl ManagedLiquidityVaultContract {
         target_reserved_xlm: i128,
         reference_credit_usdt0: i128,
         exchange_rate: i128,
-        memo_hash: BytesN<32>,
+        reference_hash: Option<BytesN<32>>,
     ) -> Result<(), ContractError> {
         if target_reserved_xlm < 0 {
             return Err(ContractError::TargetReserveMustBeNonNegative);
@@ -217,13 +209,13 @@ impl ManagedLiquidityVaultContract {
         );
         instance.set(&DataKey::LastSetReserveCredit, &reference_credit_usdt0);
         instance.set(&DataKey::LastSetReserveExchangeRate, &exchange_rate);
-        instance.set(&DataKey::LastSettlementMemoHash, &memo_hash);
+        instance.set(&DataKey::LastReserveReferenceHash, &reference_hash);
 
         env.events().publish_event(&ReserveSetEvt {
             target_reserved_xlm,
             reference_credit_usdt0,
             exchange_rate,
-            memo_hash,
+            reference_hash,
         });
         Ok(())
     }
@@ -233,7 +225,7 @@ impl ManagedLiquidityVaultContract {
         epoch_id: u64,
         yield_due_usdt0: i128,
         yield_paid_usdt0: i128,
-        memo_hash: BytesN<32>,
+        reference_hash: Option<BytesN<32>>,
     ) -> Result<(), ContractError> {
         if yield_due_usdt0 < 0 || yield_paid_usdt0 < 0 {
             return Err(ContractError::YieldSettlementAmountsMustBeNonNegative);
@@ -270,13 +262,16 @@ impl ManagedLiquidityVaultContract {
             &(total_obligation - yield_paid_usdt0),
         );
         instance.set(&DataKey::LatestSettlementEpoch, &epoch_id);
-        instance.set(&DataKey::LastSettlementMemoHash, &memo_hash);
+        instance.set(
+            &DataKey::LastYieldSettlementReferenceHash,
+            &reference_hash,
+        );
 
         env.events().publish_event(&YieldSettlementEvt {
             epoch_id,
             yield_due_usdt0,
             yield_paid_usdt0,
-            memo_hash,
+            reference_hash,
         });
         Ok(())
     }
@@ -331,40 +326,6 @@ impl ManagedLiquidityVaultContract {
         env.events().publish_event(&PartnerYieldOutEvt {
             to,
             amount: amount_usdt0,
-        });
-        Ok(())
-    }
-
-    pub fn request_loss_payout(
-        env: Env,
-        to: Address,
-        amount_xlm: i128,
-        memo_hash: BytesN<32>,
-    ) -> Result<(), ContractError> {
-        if amount_xlm <= 0 {
-            return Err(ContractError::LossPayoutAmountMustBePositive);
-        }
-        require_exchange_and_partner_auth(&env);
-
-        let reserved = get_i128(&env, &DataKey::ReservedForExchangeXlm);
-        if amount_xlm > reserved {
-            return Err(ContractError::LossPayoutExceedsReserve);
-        }
-
-        let partner_principal = get_i128(&env, &DataKey::PartnerPrincipalXlm);
-        let instance = env.storage().instance();
-        instance.set(&DataKey::ReservedForExchangeXlm, &(reserved - amount_xlm));
-        instance.set(
-            &DataKey::PartnerPrincipalXlm,
-            &(partner_principal - amount_xlm),
-        );
-        instance.set(&DataKey::LastSettlementMemoHash, &memo_hash);
-
-        xlm_client(&env).transfer(&env.current_contract_address(), &to, &amount_xlm);
-        env.events().publish_event(&LossPayoutEvt {
-            to,
-            amount: amount_xlm,
-            memo_hash,
         });
         Ok(())
     }
@@ -425,10 +386,17 @@ impl ManagedLiquidityVaultContract {
         get_i128(&env, &DataKey::LastSetReserveCredit)
     }
 
-    pub fn last_settlement_memo_hash(env: Env) -> BytesN<32> {
+    pub fn last_reserve_reference_hash(env: Env) -> Option<BytesN<32>> {
         env.storage()
             .instance()
-            .get(&DataKey::LastSettlementMemoHash)
+            .get(&DataKey::LastReserveReferenceHash)
+            .unwrap()
+    }
+
+    pub fn last_yield_reference_hash(env: Env) -> Option<BytesN<32>> {
+        env.storage()
+            .instance()
+            .get(&DataKey::LastYieldSettlementReferenceHash)
             .unwrap()
     }
 

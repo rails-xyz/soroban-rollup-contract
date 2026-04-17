@@ -85,10 +85,8 @@ fn test_deployment() {
     assert_eq!(client.collected_yield_usdt0(), 0);
     assert_eq!(client.yield_debt_usdt0(), 0);
     assert_eq!(client.latest_settlement_epoch(), 0);
-    assert_eq!(
-        client.last_settlement_memo_hash(),
-        BytesN::from_array(&env, &[0; 32])
-    );
+    assert_eq!(client.last_reserve_reference_hash(), None);
+    assert_eq!(client.last_yield_reference_hash(), None);
 }
 
 #[test]
@@ -101,7 +99,7 @@ fn test_deposit_and_set_reserve() {
     let reserve_target = 2_0000000;
     let reference_credit = 160_0000000;
     let exchange_rate = 10_000000;
-    let memo_hash = BytesN::from_array(&env, &[1; 32]);
+    let reference_hash = Some(BytesN::from_array(&env, &[1; 32]));
 
     xlm_client.approve(
         &funding_partner,
@@ -114,7 +112,7 @@ fn test_deposit_and_set_reserve() {
         &reserve_target,
         &reference_credit,
         &exchange_rate,
-        &memo_hash,
+        &reference_hash,
     );
 
     assert_eq!(client.partner_principal_xlm(), deposit_amount);
@@ -122,7 +120,8 @@ fn test_deposit_and_set_reserve() {
     assert_eq!(client.reserved_for_exchange_xlm(), reserve_target);
     assert_eq!(client.last_set_reserve_credit(), reference_credit);
     assert_eq!(client.last_set_reserve_exchange_rate(), exchange_rate);
-    assert_eq!(client.last_settlement_memo_hash(), memo_hash);
+    assert_eq!(client.last_reserve_reference_hash(), reference_hash);
+    assert_eq!(client.last_yield_reference_hash(), None);
     assert_eq!(client.xlm_balance(), deposit_amount);
 }
 
@@ -135,14 +134,16 @@ fn test_record_and_pay_yield_then_withdraw() {
     let settlement_paid = 4_0000000;
     let settlement_due = 10_0000000;
     let later_payment = 2_0000000;
-    let memo_hash = BytesN::from_array(&env, &[2; 32]);
+    let reference_hash = Some(BytesN::from_array(&env, &[2; 32]));
 
     yield_client.approve(&exchange, &client.address, &settlement_paid, &LEDGER_BUMP);
-    client.record_yield_settlement(&1u64, &settlement_due, &settlement_paid, &memo_hash);
+    client.record_yield_settlement(&1u64, &settlement_due, &settlement_paid, &reference_hash);
 
     assert_eq!(client.collected_yield_usdt0(), settlement_paid);
     assert_eq!(client.yield_debt_usdt0(), settlement_due - settlement_paid);
     assert_eq!(client.latest_settlement_epoch(), 1);
+    assert_eq!(client.last_yield_reference_hash(), reference_hash);
+    assert_eq!(client.last_reserve_reference_hash(), None);
 
     yield_client.approve(&exchange, &client.address, &later_payment, &LEDGER_BUMP);
     client.pay_yield(&later_payment);
@@ -166,16 +167,15 @@ fn test_record_and_pay_yield_then_withdraw() {
 }
 
 #[test]
-fn test_request_loss_payout_updates_balances() {
+fn test_withdraw_partner_principal_updates_balances() {
     let env = Env::default();
     let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
         deploy_fixture(&env);
 
     let deposit_amount = 10_0000000;
     let reserve_target = 2_0000000;
-    let payout_amount = 1_5000000;
-    let memo_hash = BytesN::from_array(&env, &[3; 32]);
-    let settlement_wallet = Address::generate(&env);
+    let withdraw_amount = 1_5000000;
+    let reserve_reference_hash = Some(BytesN::from_array(&env, &[3; 32]));
 
     xlm_client.approve(
         &funding_partner,
@@ -184,38 +184,45 @@ fn test_request_loss_payout_updates_balances() {
         &LEDGER_BUMP,
     );
     client.deposit_partner(&deposit_amount);
-    client.set_reserve(&reserve_target, &160_0000000, &10_000000, &memo_hash);
+    client.set_reserve(
+        &reserve_target,
+        &160_0000000,
+        &10_000000,
+        &reserve_reference_hash,
+    );
 
-    let initial_wallet_balance = xlm_client.balance(&settlement_wallet);
-    client.request_loss_payout(&settlement_wallet, &payout_amount, &memo_hash);
+    let initial_partner_balance = xlm_client.balance(&funding_partner);
+    client.withdraw_partner_principal(&funding_partner, &withdraw_amount);
 
     assert_eq!(
         client.partner_principal_xlm(),
-        deposit_amount - payout_amount
+        deposit_amount - withdraw_amount
     );
-    assert_eq!(client.free_principal_xlm(), deposit_amount - reserve_target);
     assert_eq!(
-        client.reserved_for_exchange_xlm(),
-        reserve_target - payout_amount
+        client.free_principal_xlm(),
+        deposit_amount - reserve_target - withdraw_amount
     );
-    assert_eq!(client.last_settlement_memo_hash(), memo_hash);
+    assert_eq!(client.reserved_for_exchange_xlm(), reserve_target);
     assert_eq!(
-        xlm_client.balance(&settlement_wallet),
-        initial_wallet_balance + payout_amount
+        client.last_reserve_reference_hash(),
+        reserve_reference_hash
+    );
+    assert_eq!(
+        xlm_client.balance(&funding_partner),
+        initial_partner_balance + withdraw_amount
     );
 }
 
 #[test]
-fn test_request_loss_payout_records_dual_auth() {
+fn test_withdraw_partner_principal_records_dual_auth() {
     let env = Env::default();
     let (_owner, exchange, funding_partner, xlm_client, _yield_client, client) =
         deploy_fixture(&env);
 
     let deposit_amount = 10_0000000;
     let reserve_target = 2_0000000;
-    let payout_amount = 1_0000000;
-    let memo_hash = BytesN::from_array(&env, &[4; 32]);
-    let settlement_wallet = Address::generate(&env);
+    let withdraw_amount = 1_0000000;
+    let reserve_reference_hash = Some(BytesN::from_array(&env, &[4; 32]));
 
     xlm_client.approve(
         &funding_partner,
@@ -224,10 +231,15 @@ fn test_request_loss_payout_records_dual_auth() {
         &LEDGER_BUMP,
     );
     client.deposit_partner(&deposit_amount);
-    client.set_reserve(&reserve_target, &160_0000000, &10_000000, &memo_hash);
+    client.set_reserve(
+        &reserve_target,
+        &160_0000000,
+        &10_000000,
+        &reserve_reference_hash,
+    );
 
     let _ = env.auths();
-    client.request_loss_payout(&settlement_wallet, &payout_amount, &memo_hash);
+    client.withdraw_partner_principal(&funding_partner, &withdraw_amount);
 
     let auths = env.auths();
     let addresses: std::vec::Vec<_> = auths.into_iter().map(|(addr, _)| addr).collect();
@@ -236,14 +248,14 @@ fn test_request_loss_payout_records_dual_auth() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #12)")]
-fn test_request_loss_payout_exceeds_reserve_panics() {
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_withdraw_partner_principal_exceeds_free_principal_panics() {
     let env = Env::default();
     let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
         deploy_fixture(&env);
 
     let deposit_amount = 10_0000000;
-    let memo_hash = BytesN::from_array(&env, &[5; 32]);
+    let reserve_reference_hash = Some(BytesN::from_array(&env, &[5; 32]));
 
     xlm_client.approve(
         &funding_partner,
@@ -252,7 +264,39 @@ fn test_request_loss_payout_exceeds_reserve_panics() {
         &LEDGER_BUMP,
     );
     client.deposit_partner(&deposit_amount);
-    client.set_reserve(&2_0000000, &160_0000000, &10_000000, &memo_hash);
+    client.set_reserve(
+        &2_0000000,
+        &160_0000000,
+        &10_000000,
+        &reserve_reference_hash,
+    );
 
-    client.request_loss_payout(&Address::generate(&env), &3_0000000, &memo_hash);
+    client.withdraw_partner_principal(&funding_partner, &9_0000000);
+}
+
+#[test]
+fn test_set_reserve_can_clear_reference_hash_for_fx_only_update() {
+    let env = Env::default();
+    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
+        deploy_fixture(&env);
+
+    let deposit_amount = 10_0000000;
+    let initial_reference_hash = Some(BytesN::from_array(&env, &[6; 32]));
+
+    xlm_client.approve(
+        &funding_partner,
+        &client.address,
+        &deposit_amount,
+        &LEDGER_BUMP,
+    );
+    client.deposit_partner(&deposit_amount);
+    client.set_reserve(&2_0000000, &160_0000000, &10_000000, &initial_reference_hash);
+    assert_eq!(client.last_reserve_reference_hash(), initial_reference_hash);
+
+    client.set_reserve(&2_8580000, &160_0000000, &7_000000, &None);
+
+    assert_eq!(client.reserved_for_exchange_xlm(), 2_8580000);
+    assert_eq!(client.last_set_reserve_credit(), 160_0000000);
+    assert_eq!(client.last_set_reserve_exchange_rate(), 7_000000);
+    assert_eq!(client.last_reserve_reference_hash(), None);
 }

@@ -123,7 +123,7 @@ Key points shown in the diagram:
 - the only MM is the exchange,
 - the exchange controls how much deposited `XLM` is reserved as collateral,
 - the exchange covers realized losses first using its own resources,
-- the exchange does not receive `XLM` reimbursement from the,
+- the exchange does not receive `XLM` reimbursement from the vault,
 - and partner principal can leave the vault only when both parties approve the withdrawal,
 - and yield in `USDT0` can only be withdrawn by the funding partner.
 
@@ -149,7 +149,8 @@ Because there is only one depositor and one MM, the state can be collapsed to gl
 
 - `LastSetReserveExchangeRate`
 - `LastSetReserveCredit`
-- `LastSettlementMemoHash`
+- `LastReserveReferenceHash`
+- `LastYieldSettlementReferenceHash`
 
 These are not strictly required, but they help with off-chain reconciliation and audit trails.
 
@@ -198,7 +199,7 @@ For this design, the simplest governance pattern is:
 
 #### Exchange-Only
 
-- `set_reserve(target_reserved_xlm, reference_credit_usdt0, exchange_rate, memo_hash)`
+- `set_reserve(target_reserved_xlm, reference_credit_usdt0, exchange_rate, reference_hash)`
 - `record_yield_settlement(...)`
 - `pay_yield(amount_usdt0)`
 
@@ -236,14 +237,14 @@ This is dual-approved because `XLM` leaves the vault.
 
 #### Collateral Management
 
-##### set_reserve(target_reserved_xlm, reference_credit_usdt0, exchange_rate, memo_hash)
+##### set_reserve(target_reserved_xlm, reference_credit_usdt0, exchange_rate, reference_hash)
 
 `Exchange`\-only.
 
 - Sets the total reserved collateral to `target_reserved_xlm`.
 - Updates `ReservedForExchangeXlm`.
 - Updates `FreePrincipalXlm` as the remaining unreserved `XLM`.
-- Stores `reference_credit_usdt0`, `exchange_rate`, and `memo_hash` as audit metadata for the exchange's off-chain reserve calculation.
+- Stores `reference_credit_usdt0`, `exchange_rate`, and an optional `reference_hash` as audit metadata for the exchange's off-chain reserve calculation.
 
 This is intentionally exchange-controlled because the deposited `XLM` is already agreed to be available as collateral.
 
@@ -251,9 +252,11 @@ This method replaces separate reserve and release methods. It is easier to recon
 
 The contract should validate basic balance constraints, but it does not need to recompute the reserve requirement from price on-chain.
 
+If the reserve change is linked to an internal credit transaction, `reference_hash` should contain that transaction hash. If the reserve change is only an FX-driven adjustment, `reference_hash` may be empty. An empty value should clear the previous reserve reference rather than keep an older hash.
+
 #### Yield Methods
 
-##### record_yield_settlement(epoch_id, yield_due_usdt0, yield_paid_usdt0, memo_hash)
+##### record_yield_settlement(epoch_id, yield_due_usdt0, yield_paid_usdt0, reference_hash)
 
 `Exchange`\-only.
 
@@ -262,8 +265,11 @@ The contract should validate basic balance constraints, but it does not need to 
 - Increases `CollectedYieldUsdt0` by the amount paid.
 - Increases `YieldDebtUsdt0` by any unpaid portion.
 - Updates `LatestSettlementEpoch`.
+- Stores an optional `reference_hash` for the off-chain yield settlement package.
 
 This method records the exchange's settlement accounting without moving `XLM` out of the vault.
+
+If there is no external settlement package for that update, the empty value should clear the previous yield reference rather than keep an older hash.
 
 ##### pay_yield(amount_usdt0)
 
@@ -298,7 +304,8 @@ pub enum DataKey {
     LatestSettlementEpoch,
     LastSetReserveExchangeRate,
     LastSetReserveCredit,
-    LastSettlementMemoHash,
+    LastReserveReferenceHash,
+    LastYieldSettlementReferenceHash,
 }
 ```
 
@@ -356,7 +363,7 @@ Step 2: exchange sets the reserve to `2,000 XLM`
 Contract call:
 
 ```
-set_reserve(2,000, 160, 0.10, memo_hash)
+set_reserve(2,000, 160, 0.10, Some(reference_hash))
 ```
 
 State:
@@ -396,7 +403,7 @@ Assume:
 Contract call:
 
 ```
-record_yield_settlement(epoch_1, 10, 10, memo_hash)
+record_yield_settlement(epoch_1, 10, 10, Some(reference_hash))
 ```
 
 State after settlement:
@@ -457,7 +464,7 @@ Additional reserve needed:
 Instead of realizing a loss, the exchange updates the total reserve target:
 
 ```
-set_reserve(2,858, 160, 0.07, memo_hash)
+set_reserve(2,858, 160, 0.07, None)
 ```
 
 State after reserve increase:
