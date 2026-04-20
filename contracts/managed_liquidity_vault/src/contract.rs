@@ -1,3 +1,16 @@
+//! # Managed Liquidity Vault Contract.
+//!
+//! This contract implements a single-partner managed vault where:
+//! - one `FundingPartner` deposits and withdraws `XLM` principal,
+//! - one `Exchange` reserves deposited `XLM` as collateral for off-chain
+//!   internal credit and market making,
+//! - yield is paid in a separate `USDT0`-like token and can only be withdrawn
+//!   by the `FundingPartner`,
+//! - and upgrade authority is delegated to a separate governance `owner`.
+//!
+//! The reserve model is intentionally simple. The contract only checks that the
+//! posted reserve covers the stated credit using a fixed-point exchange rate.
+
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
     BytesN, Env,
@@ -8,6 +21,7 @@ use stellar_macros::Upgradeable;
 
 const RATE_SCALE: i128 = 10_000_000;
 
+/// Storage keys used by the managed liquidity vault.
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -27,6 +41,7 @@ pub enum DataKey {
     LastYieldSettlementReferenceHash,
 }
 
+/// Errors returned by the managed liquidity vault.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -49,16 +64,19 @@ pub enum ContractError {
     ArithmeticOverflow = 19,
 }
 
+/// Managed liquidity vault contract.
 #[derive(Upgradeable)]
 #[contract]
 pub struct ManagedLiquidityVaultContract;
 
+/// Event emitted when the funding partner deposits principal into the vault.
 #[contractevent]
 #[derive(Clone)]
 pub struct PartnerDepositEvt {
     pub amount: i128,
 }
 
+/// Event emitted when free principal leaves the vault.
 #[contractevent]
 #[derive(Clone)]
 pub struct PartnerPrincipalOutEvt {
@@ -66,6 +84,7 @@ pub struct PartnerPrincipalOutEvt {
     pub amount: i128,
 }
 
+/// Event emitted when the exchange sets the current reserve target.
 #[contractevent]
 #[derive(Clone)]
 pub struct ReserveSetEvt {
@@ -75,6 +94,7 @@ pub struct ReserveSetEvt {
     pub reference_hash: Option<BytesN<32>>,
 }
 
+/// Event emitted when yield debt for an epoch is recorded.
 #[contractevent]
 #[derive(Clone)]
 pub struct YieldSettlementEvt {
@@ -84,12 +104,14 @@ pub struct YieldSettlementEvt {
     pub reference_hash: Option<BytesN<32>>,
 }
 
+/// Event emitted when the exchange pays yield outside epoch settlement.
 #[contractevent]
 #[derive(Clone)]
 pub struct YieldPaidEvt {
     pub amount: i128,
 }
 
+/// Event emitted when the funding partner withdraws collected yield.
 #[contractevent]
 #[derive(Clone)]
 pub struct PartnerYieldOutEvt {
@@ -99,6 +121,23 @@ pub struct PartnerYieldOutEvt {
 
 #[contractimpl]
 impl ManagedLiquidityVaultContract {
+    /// Initializes the vault.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `xlm_token` - Token contract used as vault principal and collateral.
+    /// * `yield_token` - Token contract used for exchange-paid yield.
+    /// * `exchange` - Address authorized to manage reserve and yield
+    ///   settlement.
+    /// * `funding_partner` - Address authorized to deposit principal and
+    ///   withdraw collected yield.
+    /// * `owner` - Upgrade-only governance address.
+    ///
+    /// # Notes
+    ///
+    /// * `owner` is not used for normal vault operations.
+    /// * Principal and yield balances are initialized to zero.
     pub fn __constructor(
         env: Env,
         xlm_token: Address,
@@ -107,8 +146,6 @@ impl ManagedLiquidityVaultContract {
         funding_partner: Address,
         owner: Address,
     ) {
-        // `owner` is an upgrade-only governance address. Business operations are
-        // deliberately authorized by `exchange` and/or `funding_partner` below.
         ownable::set_owner(&env, &owner);
         let instance = env.storage().instance();
         instance.set(&DataKey::XlmToken, &xlm_token);
@@ -130,6 +167,22 @@ impl ManagedLiquidityVaultContract {
         );
     }
 
+    /// Deposits principal into the vault.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `amount_xlm` - Amount of principal token to deposit.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::DepositAmountMustBePositive`] - If `amount_xlm <= 0`.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `FundingPartner` is required.
+    /// * No share token is minted because this design supports a single funding
+    ///   partner only.
     pub fn deposit_partner(env: Env, amount_xlm: i128) -> Result<(), ContractError> {
         if amount_xlm <= 0 {
             return Err(ContractError::DepositAmountMustBePositive);
@@ -137,8 +190,6 @@ impl ManagedLiquidityVaultContract {
         let funding_partner = get_address(&env, &DataKey::FundingPartner);
         funding_partner.require_auth();
 
-        // The vault holds principal custody directly; no share token is minted in
-        // this managed design because there is only one funding partner.
         xlm_client(&env).transfer(
             &funding_partner,
             &env.current_contract_address(),
@@ -159,6 +210,25 @@ impl ManagedLiquidityVaultContract {
         Ok(())
     }
 
+    /// Withdraws free principal from the vault.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `to` - Recipient of the withdrawn principal.
+    /// * `amount_xlm` - Amount of free principal to withdraw.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::WithdrawAmountMustBePositive`] - If `amount_xlm <= 0`.
+    /// * [`ContractError::InsufficientFreePrincipal`] - If `amount_xlm`
+    ///   exceeds the unreserved principal balance.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from both `Exchange` and `FundingPartner` is required.
+    /// * Reserved principal remains encumbered behind exchange credit and is
+    ///   never withdrawable through this method.
     pub fn withdraw_partner_principal(
         env: Env,
         to: Address,
@@ -174,8 +244,6 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::InsufficientFreePrincipal);
         }
 
-        // Only free principal may leave the vault. Reserved principal remains
-        // encumbered behind exchange credit and cannot be withdrawn.
         let partner_principal = get_i128(&env, &DataKey::PartnerPrincipalXlm);
         let instance = env.storage().instance();
         instance.set(
@@ -192,6 +260,42 @@ impl ManagedLiquidityVaultContract {
         Ok(())
     }
 
+    /// Sets the exchange reserve target.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `target_reserved_xlm` - Total principal to reserve as exchange
+    ///   collateral after this call.
+    /// * `reference_credit_usdt0` - Off-chain exchange credit amount that the
+    ///   reserve is expected to cover.
+    /// * `exchange_rate` - Fixed-point price of `USDT0 per 1 XLM`, scaled by
+    ///   [`RATE_SCALE`].
+    /// * `reference_hash` - Optional audit reference for the off-chain reserve
+    ///   calculation or credit movement.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::TargetReserveMustBeNonNegative`] - If
+    ///   `target_reserved_xlm < 0`.
+    /// * [`ContractError::AuditValuesMustBeNonNegative`] - If
+    ///   `reference_credit_usdt0 < 0` or `exchange_rate < 0`.
+    /// * [`ContractError::ReserveExceedsPrincipal`] - If the reserve target is
+    ///   larger than total partner principal.
+    /// * [`ContractError::ExchangeRateMustBePositive`] - If a positive credit
+    ///   amount is posted with a zero or negative exchange rate.
+    /// * [`ContractError::ReserveBelowRequiredCollateral`] - If the posted
+    ///   reserve does not cover the stated credit.
+    /// * [`ContractError::ArithmeticOverflow`] - If fixed-point multiplication
+    ///   overflows.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `Exchange` is required.
+    /// * The contract only checks whether the posted reserve covers the stated
+    ///   credit at the provided exchange rate.
+    /// * `reference_hash` is audit metadata only and does not affect
+    ///   authorization or balances.
     pub fn set_reserve(
         env: Env,
         target_reserved_xlm: i128,
@@ -207,11 +311,6 @@ impl ManagedLiquidityVaultContract {
         }
         require_exchange_auth(&env);
 
-        // Trust boundary:
-        // - the exchange computes reserve targets off-chain;
-        // - the contract only enforces that the posted reserve does not exceed
-        //   total principal and covers the stated credit at 100% mark value.
-        // Haircut policy intentionally remains off-chain.
         let partner_principal = get_i128(&env, &DataKey::PartnerPrincipalXlm);
         if target_reserved_xlm > partner_principal {
             return Err(ContractError::ReserveExceedsPrincipal);
@@ -229,8 +328,6 @@ impl ManagedLiquidityVaultContract {
             &DataKey::FreePrincipalXlm,
             &(partner_principal - target_reserved_xlm),
         );
-        // `LastSetReserve*` fields are audit metadata only. They are not used for
-        // authorization and do not affect balances after validation succeeds.
         instance.set(&DataKey::LastSetReserveCredit, &reference_credit_usdt0);
         instance.set(&DataKey::LastSetReserveExchangeRate, &exchange_rate);
         instance.set(&DataKey::LastReserveReferenceHash, &reference_hash);
@@ -244,6 +341,32 @@ impl ManagedLiquidityVaultContract {
         Ok(())
     }
 
+    /// Records yield debt and any concurrent yield payment for a settlement
+    /// epoch.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `epoch_id` - Monotonically increasing settlement epoch identifier.
+    /// * `yield_due_usdt0` - Additional yield obligation created by this epoch.
+    /// * `yield_paid_usdt0` - Portion of total outstanding yield paid now.
+    /// * `reference_hash` - Optional audit reference for the off-chain
+    ///   settlement package.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::YieldSettlementAmountsMustBeNonNegative`] - If either
+    ///   yield amount is negative.
+    /// * [`ContractError::SettlementEpochMustIncrease`] - If `epoch_id` is not
+    ///   greater than the previously recorded epoch.
+    /// * [`ContractError::YieldPaidExceedsDebtAndCurrentDue`] - If the payment
+    ///   exceeds prior debt plus current epoch due.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `Exchange` is required.
+    /// * `yield_paid_usdt0` must be backed by an actual token transfer.
+    /// * Unpaid yield remains debt and is not added to collected yield.
     pub fn record_yield_settlement(
         env: Env,
         epoch_id: u64,
@@ -267,8 +390,6 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::YieldPaidExceedsDebtAndCurrentDue);
         }
 
-        // `yield_paid_usdt0` must be backed by an actual token transfer. Unpaid
-        // yield remains as debt and is not treated as collectible balance.
         if yield_paid_usdt0 > 0 {
             yield_client(&env).transfer(
                 &get_address(&env, &DataKey::Exchange),
@@ -302,14 +423,28 @@ impl ManagedLiquidityVaultContract {
         Ok(())
     }
 
+    /// Pays yield into the vault outside epoch settlement.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `amount_usdt0` - Amount of yield token to transfer into the vault.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::YieldAmountMustBePositive`] - If `amount_usdt0 <= 0`.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `Exchange` is required.
+    /// * This method can only improve the funding partner position by reducing
+    ///   debt and/or increasing collected yield.
     pub fn pay_yield(env: Env, amount_usdt0: i128) -> Result<(), ContractError> {
         if amount_usdt0 <= 0 {
             return Err(ContractError::YieldAmountMustBePositive);
         }
         require_exchange_auth(&env);
 
-        // This method is intentionally one-way favorable to the funding partner:
-        // it can only reduce debt and/or increase collected yield.
         let exchange = get_address(&env, &DataKey::Exchange);
         yield_client(&env).transfer(&exchange, &env.current_contract_address(), &amount_usdt0);
 
@@ -331,6 +466,23 @@ impl ManagedLiquidityVaultContract {
         Ok(())
     }
 
+    /// Withdraws collected yield from the vault.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `to` - Recipient of withdrawn yield.
+    /// * `amount_usdt0` - Amount of collected yield to withdraw.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::YieldAmountMustBePositive`] - If `amount_usdt0 <= 0`.
+    /// * [`ContractError::InsufficientCollectedYield`] - If `amount_usdt0`
+    ///   exceeds collected yield balance.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `FundingPartner` is required.
     pub fn withdraw_partner_yield(
         env: Env,
         to: Address,
@@ -358,62 +510,81 @@ impl ManagedLiquidityVaultContract {
         Ok(())
     }
 
+    /// Rejects ownership renunciation.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::RenounceOwnershipDisabled`] - Always returned.
     pub fn renounce_ownership(_env: Env) -> Result<(), ContractError> {
         Err(ContractError::RenounceOwnershipDisabled)
     }
 
+    /// Returns the upgrade-only governance owner.
     pub fn owner(env: Env) -> Option<Address> {
         ownable::get_owner(&env)
     }
 
+    /// Returns the exchange address.
     pub fn exchange(env: Env) -> Address {
         get_address(&env, &DataKey::Exchange)
     }
 
+    /// Returns the funding partner address.
     pub fn funding_partner(env: Env) -> Address {
         get_address(&env, &DataKey::FundingPartner)
     }
 
+    /// Returns the principal token contract address.
     pub fn xlm_token(env: Env) -> Address {
         get_address(&env, &DataKey::XlmToken)
     }
 
+    /// Returns the yield token contract address.
     pub fn yield_token(env: Env) -> Address {
         get_address(&env, &DataKey::YieldToken)
     }
 
+    /// Returns total partner principal tracked by the vault.
     pub fn partner_principal_xlm(env: Env) -> i128 {
         get_i128(&env, &DataKey::PartnerPrincipalXlm)
     }
 
+    /// Returns principal that is not currently reserved.
     pub fn free_principal_xlm(env: Env) -> i128 {
         get_i128(&env, &DataKey::FreePrincipalXlm)
     }
 
+    /// Returns principal currently reserved for exchange collateral.
     pub fn reserved_for_exchange_xlm(env: Env) -> i128 {
         get_i128(&env, &DataKey::ReservedForExchangeXlm)
     }
 
+    /// Returns yield actually paid into the vault.
     pub fn collected_yield_usdt0(env: Env) -> i128 {
         get_i128(&env, &DataKey::CollectedYieldUsdt0)
     }
 
+    /// Returns yield owed by the exchange but not yet paid.
     pub fn yield_debt_usdt0(env: Env) -> i128 {
         get_i128(&env, &DataKey::YieldDebtUsdt0)
     }
 
+    /// Returns the latest recorded yield settlement epoch.
     pub fn latest_settlement_epoch(env: Env) -> u64 {
         get_u64(&env, &DataKey::LatestSettlementEpoch)
     }
 
+    /// Returns the last reserve-set exchange rate.
     pub fn last_set_reserve_exchange_rate(env: Env) -> i128 {
         get_i128(&env, &DataKey::LastSetReserveExchangeRate)
     }
 
+    /// Returns the last reserve-set reference credit.
     pub fn last_set_reserve_credit(env: Env) -> i128 {
         get_i128(&env, &DataKey::LastSetReserveCredit)
     }
 
+    /// Returns the most recent optional reserve audit reference.
     pub fn last_reserve_reference_hash(env: Env) -> Option<BytesN<32>> {
         env.storage()
             .instance()
@@ -421,6 +592,7 @@ impl ManagedLiquidityVaultContract {
             .unwrap()
     }
 
+    /// Returns the most recent optional yield-settlement audit reference.
     pub fn last_yield_reference_hash(env: Env) -> Option<BytesN<32>> {
         env.storage()
             .instance()
@@ -428,10 +600,12 @@ impl ManagedLiquidityVaultContract {
             .unwrap()
     }
 
+    /// Returns the current principal token balance held by the vault.
     pub fn xlm_balance(env: Env) -> i128 {
         xlm_client(&env).balance(&env.current_contract_address())
     }
 
+    /// Returns the current yield token balance held by the vault.
     pub fn yield_balance(env: Env) -> i128 {
         yield_client(&env).balance(&env.current_contract_address())
     }
@@ -439,8 +613,6 @@ impl ManagedLiquidityVaultContract {
 
 impl UpgradeableInternal for ManagedLiquidityVaultContract {
     fn _require_auth(e: &Env, operator: &Address) {
-        // Upgrades are intentionally separated from business roles. The contract
-        // owner is the sole upgrade authority and should be a governance address.
         operator.require_auth();
         let owner = ownable::get_owner(e).unwrap();
         if *operator != owner {
@@ -449,18 +621,39 @@ impl UpgradeableInternal for ManagedLiquidityVaultContract {
     }
 }
 
+/// Returns the address stored at `key`.
 fn get_address(env: &Env, key: &DataKey) -> Address {
     env.storage().instance().get(key).unwrap()
 }
 
+/// Returns the `i128` value stored at `key`.
 fn get_i128(env: &Env, key: &DataKey) -> i128 {
     env.storage().instance().get(key).unwrap()
 }
 
+/// Returns the `u64` value stored at `key`.
 fn get_u64(env: &Env, key: &DataKey) -> u64 {
     env.storage().instance().get(key).unwrap()
 }
 
+/// Verifies that the posted reserve covers the stated credit.
+///
+/// # Arguments
+///
+/// * `_env` - Access to the Soroban environment.
+/// * `target_reserved_xlm` - Reserve target in principal-token base units.
+/// * `reference_credit_usdt0` - Reference credit amount in yield-token base
+///   units.
+/// * `exchange_rate` - Fixed-point price of `USDT0 per 1 XLM`, scaled by
+///   [`RATE_SCALE`].
+///
+/// # Errors
+///
+/// * [`ContractError::ExchangeRateMustBePositive`] - If credit is positive and
+///   `exchange_rate <= 0`.
+/// * [`ContractError::ReserveBelowRequiredCollateral`] - If the reserve does
+///   not cover the reference credit.
+/// * [`ContractError::ArithmeticOverflow`] - If multiplication overflows.
 fn ensure_reserve_covers_credit(
     _env: &Env,
     target_reserved_xlm: i128,
@@ -474,9 +667,6 @@ fn ensure_reserve_covers_credit(
         return Err(ContractError::ExchangeRateMustBePositive);
     }
 
-    // `exchange_rate` is fixed-point USDT0 per 1 XLM, scaled by `RATE_SCALE`.
-    // The check enforces 100% mark-value coverage only:
-    // reserved_xlm * price >= reference_credit_usdt0.
     let covered_credit = checked_mul(target_reserved_xlm, exchange_rate)?;
     let covered_credit = covered_credit / RATE_SCALE;
     if covered_credit < reference_credit_usdt0 {
@@ -485,29 +675,35 @@ fn ensure_reserve_covers_credit(
     Ok(())
 }
 
+/// Multiplies two `i128` values and converts overflow into a contract error.
 fn checked_mul(lhs: i128, rhs: i128) -> Result<i128, ContractError> {
     lhs.checked_mul(rhs)
         .ok_or(ContractError::ArithmeticOverflow)
 }
 
+/// Requires authorization from the configured exchange.
 fn require_exchange_auth(env: &Env) {
     get_address(env, &DataKey::Exchange).require_auth();
 }
 
+/// Requires authorization from the configured funding partner.
 fn require_partner_auth(env: &Env) {
     get_address(env, &DataKey::FundingPartner).require_auth();
 }
 
+/// Requires authorization from both the exchange and the funding partner.
 fn require_exchange_and_partner_auth(env: &Env) {
     require_exchange_auth(env);
     require_partner_auth(env);
 }
 
+/// Returns the token client for the principal token.
 fn xlm_client<'a>(env: &'a Env) -> soroban_sdk::token::TokenClient<'a> {
     let token = get_address(env, &DataKey::XlmToken);
     soroban_sdk::token::TokenClient::new(env, &token)
 }
 
+/// Returns the token client for the yield token.
 fn yield_client<'a>(env: &'a Env) -> soroban_sdk::token::TokenClient<'a> {
     let token = get_address(env, &DataKey::YieldToken);
     soroban_sdk::token::TokenClient::new(env, &token)
