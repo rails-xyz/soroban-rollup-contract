@@ -1,3 +1,14 @@
+//! # Rollup Contract.
+//!
+//! This contract maintains a single collateral pool that backs:
+//! - user deposits into the rollup,
+//! - owner-posted withdrawal allowances for users,
+//! - and owner-accrued protocol fees.
+//!
+//! The owner advances rollup state by posting new block hashes together with
+//! newly withdrawable balances and fees. Users can then withdraw up to their
+//! allowance directly from the collateral pool.
+
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
     BytesN, Env, Vec,
@@ -7,6 +18,7 @@ use stellar_contract_utils::upgradeable::UpgradeableInternal;
 use stellar_access::ownable;
 use stellar_macros::{only_owner, Upgradeable};
 
+/// Storage keys used by the rollup contract.
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -17,6 +29,7 @@ pub enum DataKey {
     TotalWithdrawable,
 }
 
+/// Errors returned by the rollup contract.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -48,10 +61,12 @@ pub enum ContractError {
     Unauthorized = 62,
 }
 
+/// Rollup contract.
 #[derive(Upgradeable)]
 #[contract]
 pub struct RollupContract;
 
+/// Event emitted when collateral is deposited into the rollup.
 #[contractevent]
 #[derive(Clone)]
 pub struct DepositEvent {
@@ -59,6 +74,7 @@ pub struct DepositEvent {
     pub amount: i128,
 }
 
+/// Event emitted when a user withdraws their allowance.
 #[contractevent]
 #[derive(Clone)]
 pub struct WithdrawalEvent {
@@ -66,6 +82,7 @@ pub struct WithdrawalEvent {
     pub amount: i128,
 }
 
+/// Event emitted when the owner posts a new rollup block.
 #[contractevent]
 #[derive(Clone)]
 pub struct NewBlockEvent {
@@ -74,6 +91,7 @@ pub struct NewBlockEvent {
     pub new_fees: i128,
 }
 
+/// Event emitted when accumulated fees are collected.
 #[contractevent]
 #[derive(Clone)]
 pub struct FeesCollectedEvent {
@@ -83,6 +101,20 @@ pub struct FeesCollectedEvent {
 
 #[contractimpl]
 impl RollupContract {
+    /// Initializes the rollup contract.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `collateral_token` - Token contract used for deposits, withdrawals,
+    ///   and fees.
+    /// * `owner` - Upgrade and admin authority for rollup updates and fee
+    ///   collection.
+    ///
+    /// # Notes
+    ///
+    /// * The latest block hash is initialized to the zero hash.
+    /// * Fees and total withdrawable balances are initialized to zero.
     pub fn __constructor(env: Env, collateral_token: Address, owner: Address) {
         ownable::set_owner(&env, &owner);
         env.storage().instance().set(
@@ -98,6 +130,21 @@ impl RollupContract {
             .set(&DataKey::TotalWithdrawable, &0i128);
     }
 
+    /// Deposits collateral into the rollup.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `user` - Address providing the deposit.
+    /// * `amount` - Amount of collateral token to deposit.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::DepositAmountMustBePositive`] - If `amount <= 0`.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `user` is required.
     pub fn deposit(env: Env, user: Address, amount: i128) -> Result<(), ContractError> {
         user.require_auth();
         if amount <= 0 {
@@ -114,6 +161,41 @@ impl RollupContract {
         Ok(())
     }
 
+    /// Advances the rollup state to a new block hash and posts new withdrawable
+    /// balances plus fees.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `old_block_hash` - Expected current block hash.
+    /// * `new_block_hash` - New block hash to commit.
+    /// * `new_withdrawal_addresses` - Addresses receiving newly posted
+    ///   withdrawal allowances.
+    /// * `new_withdrawal_amounts` - Amounts paired by index with
+    ///   `new_withdrawal_addresses`.
+    /// * `new_withdrawal_sum` - Sum of all new withdrawal amounts.
+    /// * `new_fees` - Fees accrued in the new rollup block.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::NewBlockHashEmpty`] - If `new_block_hash` is zero.
+    /// * [`ContractError::OldBlockHashMismatch`] - If `old_block_hash` does not
+    ///   match the currently stored block hash.
+    /// * [`ContractError::BlockHashUnchanged`] - If the new block hash is equal
+    ///   to the old block hash.
+    /// * [`ContractError::ArrayLengthMismatch`] - If the address and amount
+    ///   arrays have different lengths.
+    /// * [`ContractError::ArrayLengthExceedsLimit`] - If more than 100
+    ///   withdrawal entries are posted.
+    /// * [`ContractError::WithdrawalSumMismatch`] - If the provided
+    ///   `new_withdrawal_sum` does not match the calculated total.
+    /// * [`ContractError::InsufficientBalance`] - If the contract balance
+    ///   cannot support the new withdrawable amount plus fees.
+    ///
+    /// # Notes
+    ///
+    /// * Owner authorization is required.
+    /// * Existing user allowances are incremented, not replaced.
     #[only_owner]
     pub fn rollup(
         env: Env,
@@ -199,6 +281,22 @@ impl RollupContract {
         Ok(())
     }
 
+    /// Withdraws the full posted allowance for `user`.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `user` - Address withdrawing its allowance.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::NoWithdrawalAllowance`] - If no positive allowance is
+    ///   available for `user`.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `user` is required.
+    /// * This method withdraws the full stored allowance and resets it to zero.
     pub fn withdraw(env: Env, user: Address) -> Result<(), ContractError> {
         user.require_auth();
 
@@ -229,6 +327,22 @@ impl RollupContract {
         Ok(())
     }
 
+    /// Collects all currently accrued protocol fees.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `to` - Recipient of collected fees.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::NoFeesToCollect`] - If no positive fee balance is
+    ///   available.
+    ///
+    /// # Notes
+    ///
+    /// * Owner authorization is required.
+    /// * Collected fees are removed from both `Fees` and `TotalWithdrawable`.
     #[only_owner]
     pub fn collect_fees(env: Env, to: Address) -> Result<(), ContractError> {
         let fees: i128 = env.storage().instance().get(&DataKey::Fees).unwrap();
@@ -257,6 +371,24 @@ impl RollupContract {
         Ok(())
     }
 
+    /// Recovers non-collateral tokens that were sent to the contract.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `token_address` - Token contract to recover.
+    /// * `to` - Recipient of the recovered tokens.
+    /// * `amount` - Amount to recover.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::CannotRecoverCollateral`] - If `token_address` is the
+    ///   configured collateral token.
+    /// * [`ContractError::RecoverAmountMustBePositive`] - If `amount <= 0`.
+    ///
+    /// # Notes
+    ///
+    /// * Owner authorization is required.
     #[only_owner]
     pub fn recover(
         env: Env,
@@ -280,25 +412,49 @@ impl RollupContract {
         Ok(())
     }
 
+    /// Rejects ownership renunciation.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::RenounceOwnershipDisabled`] - Always returned.
     pub fn renounce_ownership(_env: Env) -> Result<(), ContractError> {
         Err(ContractError::RenounceOwnershipDisabled)
     }
 
-    /// Initiates a 2-step ownership transfer. The new owner must call `accept_ownership` to complete.
-    /// Note: Auth is enforced internally by the ownable library.
+    /// Initiates a 2-step ownership transfer.
+    ///
+    /// The proposed new owner must later call [`Self::accept_ownership`] to
+    /// complete the transfer.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `new_owner` - Proposed new owner.
+    /// * `live_until_ledger` - Ledger until which the pending transfer can be
+    ///   accepted.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization is enforced internally by the ownable library.
     pub fn transfer_ownership(env: Env, new_owner: Address, live_until_ledger: u32) {
         ownable::transfer_ownership(&env, &new_owner, live_until_ledger);
     }
 
+    /// Accepts a pending ownership transfer.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
     pub fn accept_ownership(env: Env) {
         ownable::accept_ownership(&env);
     }
 
-    // View functions
+    /// Returns the current owner.
     pub fn owner(env: Env) -> Option<Address> {
         ownable::get_owner(&env)
     }
 
+    /// Returns the latest committed rollup block hash.
     pub fn latest_block_hash(env: Env) -> BytesN<32> {
         env.storage()
             .instance()
@@ -306,6 +462,7 @@ impl RollupContract {
             .unwrap()
     }
 
+    /// Returns the current withdrawal allowance for `user`.
     pub fn withdrawal_allowances(env: Env, user: Address) -> i128 {
         env.storage()
             .persistent()
@@ -313,10 +470,13 @@ impl RollupContract {
             .unwrap_or(0)
     }
 
+    /// Returns currently accrued protocol fees.
     pub fn fees(env: Env) -> i128 {
         env.storage().instance().get(&DataKey::Fees).unwrap()
     }
 
+    /// Returns the total amount currently reserved for user withdrawals plus
+    /// accrued fees.
     pub fn total_withdrawable(env: Env) -> i128 {
         env.storage()
             .instance()
@@ -324,6 +484,7 @@ impl RollupContract {
             .unwrap()
     }
 
+    /// Returns the current collateral-token balance held by the contract.
     pub fn collateral_balance(env: Env) -> i128 {
         let collateral_token: Address = env
             .storage()
@@ -336,6 +497,7 @@ impl RollupContract {
 }
 
 impl UpgradeableInternal for RollupContract {
+    /// Requires authorization from the upgrade owner.
     fn _require_auth(e: &Env, operator: &Address) {
         operator.require_auth();
         let owner = ownable::get_owner(e).unwrap();
