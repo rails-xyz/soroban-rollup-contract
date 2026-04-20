@@ -62,7 +62,7 @@ The exchange may use the reserved `XLM` only as the basis for off-chain internal
 1. The funding partner deposits `XLM` into the vault.
 2. The exchange sets how much of that `XLM` is reserved as exchange collateral.
    - this reserve can be adjusted periodically by the exchange as the exchange rate and credit needs change.
-3. The exchange credits itself internally in `USDT0` based on the reserved `XLM` and haircut.
+3. The exchange credits itself internally in `USDT0` based on the reserved `XLM`.
 4. The exchange trades using its own internal market-making activity.
 5. At settlement time, the exchange may:
    - keep collateral unchanged,
@@ -181,6 +181,7 @@ These are not strictly required, but they help with off-chain reconciliation and
 - `FreePrincipalXlm + ReservedForExchangeXlm = PartnerPrincipalXlm`
 - `CollectedYieldUsdt0 >= 0`
 - `YieldDebtUsdt0 >= 0`
+- `ReservedForExchangeXlm` must be large enough to cover `reference_credit_usdt0` under the provided `exchange_rate`
 - `CollectedYieldUsdt0` only increases when `USDT0` is actually transferred in
 - only the funding partner may withdraw collected yield
 
@@ -245,14 +246,27 @@ This is dual-approved because `XLM` leaves the vault.
 - Updates `ReservedForExchangeXlm`.
 - Updates `FreePrincipalXlm` as the remaining unreserved `XLM`.
 - Stores `reference_credit_usdt0`, `exchange_rate`, and an optional `reference_hash` as audit metadata for the exchange's off-chain reserve calculation.
+- Enforces that the target reserve is sufficient to cover the stated credit.
 
 This is intentionally exchange-controlled because the deposited `XLM` is already agreed to be available as collateral.
 
 This method replaces separate reserve and release methods. It is easier to reconcile because the exchange always writes the current target reserve state rather than issuing a delta.
 
-The contract should validate basic balance constraints, but it does not need to recompute the reserve requirement from price on-chain.
+The contract should validate basic balance constraints and enforce the minimum reserve requirement from the provided exchange rate.
 
 If the reserve change is linked to an internal credit transaction, `reference_hash` should contain that transaction hash. If the reserve change is only an FX-driven adjustment, `reference_hash` may be empty. An empty value should clear the previous reserve reference rather than keep an older hash.
+
+`exchange_rate` should be represented as a fixed-point integer equal to `USDT0 per 1 XLM`, scaled by `10_000_000`.
+
+Examples:
+
+- `0.07 USDT0 / XLM` -> `700000`
+- `0.10 USDT0 / XLM` -> `1000000`
+- `1.25 USDT0 / XLM` -> `12500000`
+
+The reserve sanity check should enforce:
+
+`target_reserved_xlm * exchange_rate / 10_000_000 >= reference_credit_usdt0`
 
 #### Yield Methods
 
@@ -325,7 +339,6 @@ pub enum DataKey {
 The following examples use:
 
 - initial mark price: `1 XLM = 0.10 USDT0`
-- haircut: `80%`
 - funding partner deposit: `10,000 XLM`
 
 ### Example 1: Partner Deposits And Exchange Reserves Collateral
@@ -380,7 +393,7 @@ Off-chain exchange credit:
 
 ```
 reserved value = 2,000 XLM * 0.10 = 200 USDT0
-exchange credit = 200 * 80% = 160 USDT0
+exchange credit = 200 USDT0
 ```
 
 Important observation:
