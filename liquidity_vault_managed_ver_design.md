@@ -398,7 +398,6 @@ exchange credit = 200 USDT0
 
 Important observation:
 
-- no shares were minted,
 - the funding partner remains the sole economic owner of principal,
 - and no `XLM` left the vault.
 
