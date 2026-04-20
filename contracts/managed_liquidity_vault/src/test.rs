@@ -56,8 +56,8 @@ fn deploy_fixture(
     );
     let client = ManagedLiquidityVaultContractClient::new(env, &contract_id);
 
-    xlm_admin_client.mint(&funding_partner, &20_0000000);
-    yield_admin_client.mint(&exchange, &20_0000000);
+    xlm_admin_client.mint(&funding_partner, &20_000_0000000);
+    yield_admin_client.mint(&exchange, &20_000_0000000);
 
     (
         owner,
@@ -95,10 +95,10 @@ fn test_deposit_and_set_reserve() {
     let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
         deploy_fixture(&env);
 
-    let deposit_amount = 10_0000000;
-    let reserve_target = 2_0000000;
+    let deposit_amount = 10_000_0000000;
+    let reserve_target = 2_000_0000000;
     let reference_credit = 160_0000000;
-    let exchange_rate = 10_000000;
+    let exchange_rate = 1_000000;
     let reference_hash = Some(BytesN::from_array(&env, &[1; 32]));
 
     xlm_client.approve(
@@ -172,9 +172,9 @@ fn test_withdraw_partner_principal_updates_balances() {
     let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
         deploy_fixture(&env);
 
-    let deposit_amount = 10_0000000;
-    let reserve_target = 2_0000000;
-    let withdraw_amount = 1_5000000;
+    let deposit_amount = 10_000_0000000;
+    let reserve_target = 2_000_0000000;
+    let withdraw_amount = 1_500_0000000;
     let reserve_reference_hash = Some(BytesN::from_array(&env, &[3; 32]));
 
     xlm_client.approve(
@@ -187,7 +187,7 @@ fn test_withdraw_partner_principal_updates_balances() {
     client.set_reserve(
         &reserve_target,
         &160_0000000,
-        &10_000000,
+        &1_000000,
         &reserve_reference_hash,
     );
 
@@ -219,9 +219,9 @@ fn test_withdraw_partner_principal_records_dual_auth() {
     let (_owner, exchange, funding_partner, xlm_client, _yield_client, client) =
         deploy_fixture(&env);
 
-    let deposit_amount = 10_0000000;
-    let reserve_target = 2_0000000;
-    let withdraw_amount = 1_0000000;
+    let deposit_amount = 10_000_0000000;
+    let reserve_target = 2_000_0000000;
+    let withdraw_amount = 1_000_0000000;
     let reserve_reference_hash = Some(BytesN::from_array(&env, &[4; 32]));
 
     xlm_client.approve(
@@ -234,7 +234,7 @@ fn test_withdraw_partner_principal_records_dual_auth() {
     client.set_reserve(
         &reserve_target,
         &160_0000000,
-        &10_000000,
+        &1_000000,
         &reserve_reference_hash,
     );
 
@@ -254,7 +254,7 @@ fn test_withdraw_partner_principal_exceeds_free_principal_panics() {
     let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
         deploy_fixture(&env);
 
-    let deposit_amount = 10_0000000;
+    let deposit_amount = 10_000_0000000;
     let reserve_reference_hash = Some(BytesN::from_array(&env, &[5; 32]));
 
     xlm_client.approve(
@@ -265,13 +265,13 @@ fn test_withdraw_partner_principal_exceeds_free_principal_panics() {
     );
     client.deposit_partner(&deposit_amount);
     client.set_reserve(
-        &2_0000000,
+        &2_000_0000000,
         &160_0000000,
-        &10_000000,
+        &1_000000,
         &reserve_reference_hash,
     );
 
-    client.withdraw_partner_principal(&funding_partner, &9_0000000);
+    client.withdraw_partner_principal(&funding_partner, &9_000_0000000);
 }
 
 #[test]
@@ -280,7 +280,7 @@ fn test_set_reserve_can_clear_reference_hash_for_fx_only_update() {
     let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
         deploy_fixture(&env);
 
-    let deposit_amount = 10_0000000;
+    let deposit_amount = 10_000_0000000;
     let initial_reference_hash = Some(BytesN::from_array(&env, &[6; 32]));
 
     xlm_client.approve(
@@ -290,13 +290,39 @@ fn test_set_reserve_can_clear_reference_hash_for_fx_only_update() {
         &LEDGER_BUMP,
     );
     client.deposit_partner(&deposit_amount);
-    client.set_reserve(&2_0000000, &160_0000000, &10_000000, &initial_reference_hash);
+    client.set_reserve(
+        &2_000_0000000,
+        &160_0000000,
+        &1_000000,
+        &initial_reference_hash,
+    );
     assert_eq!(client.last_reserve_reference_hash(), initial_reference_hash);
 
-    client.set_reserve(&2_8580000, &160_0000000, &7_000000, &None);
+    client.set_reserve(&2_858_0000000, &160_0000000, &700000, &None);
 
-    assert_eq!(client.reserved_for_exchange_xlm(), 2_8580000);
+    assert_eq!(client.reserved_for_exchange_xlm(), 2_858_0000000);
     assert_eq!(client.last_set_reserve_credit(), 160_0000000);
-    assert_eq!(client.last_set_reserve_exchange_rate(), 7_000000);
+    assert_eq!(client.last_set_reserve_exchange_rate(), 700000);
     assert_eq!(client.last_reserve_reference_hash(), None);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")]
+fn test_set_reserve_rejects_under_collateralized_target() {
+    let env = Env::default();
+    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
+        deploy_fixture(&env);
+
+    let deposit_amount = 10_000_0000000;
+    let reference_hash = Some(BytesN::from_array(&env, &[7; 32]));
+
+    xlm_client.approve(
+        &funding_partner,
+        &client.address,
+        &deposit_amount,
+        &LEDGER_BUMP,
+    );
+    client.deposit_partner(&deposit_amount);
+
+    client.set_reserve(&1_599_9999999, &160_0000000, &1_000000, &reference_hash);
 }

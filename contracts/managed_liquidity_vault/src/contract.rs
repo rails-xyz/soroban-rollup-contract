@@ -6,6 +6,8 @@ use stellar_access::ownable;
 use stellar_contract_utils::upgradeable::UpgradeableInternal;
 use stellar_macros::Upgradeable;
 
+const RATE_SCALE: i128 = 10_000_000;
+
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -42,6 +44,9 @@ pub enum ContractError {
     AuditValuesMustBeNonNegative = 13,
     RenounceOwnershipDisabled = 14,
     Unauthorized = 15,
+    ExchangeRateMustBePositive = 16,
+    ReserveBelowRequiredCollateral = 17,
+    ArithmeticOverflow = 19,
 }
 
 #[derive(Upgradeable)]
@@ -102,6 +107,8 @@ impl ManagedLiquidityVaultContract {
         funding_partner: Address,
         owner: Address,
     ) {
+        // `owner` is an upgrade-only governance address. Business operations are
+        // deliberately authorized by `exchange` and/or `funding_partner` below.
         ownable::set_owner(&env, &owner);
         let instance = env.storage().instance();
         instance.set(&DataKey::XlmToken, &xlm_token);
@@ -130,6 +137,8 @@ impl ManagedLiquidityVaultContract {
         let funding_partner = get_address(&env, &DataKey::FundingPartner);
         funding_partner.require_auth();
 
+        // The vault holds principal custody directly; no share token is minted in
+        // this managed design because there is only one funding partner.
         xlm_client(&env).transfer(
             &funding_partner,
             &env.current_contract_address(),
@@ -165,6 +174,8 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::InsufficientFreePrincipal);
         }
 
+        // Only free principal may leave the vault. Reserved principal remains
+        // encumbered behind exchange credit and cannot be withdrawn.
         let partner_principal = get_i128(&env, &DataKey::PartnerPrincipalXlm);
         let instance = env.storage().instance();
         instance.set(
@@ -196,10 +207,21 @@ impl ManagedLiquidityVaultContract {
         }
         require_exchange_auth(&env);
 
+        // Trust boundary:
+        // - the exchange computes reserve targets off-chain;
+        // - the contract only enforces that the posted reserve does not exceed
+        //   total principal and covers the stated credit at 100% mark value.
+        // Haircut policy intentionally remains off-chain.
         let partner_principal = get_i128(&env, &DataKey::PartnerPrincipalXlm);
         if target_reserved_xlm > partner_principal {
             return Err(ContractError::ReserveExceedsPrincipal);
         }
+        ensure_reserve_covers_credit(
+            &env,
+            target_reserved_xlm,
+            reference_credit_usdt0,
+            exchange_rate,
+        )?;
 
         let instance = env.storage().instance();
         instance.set(&DataKey::ReservedForExchangeXlm, &target_reserved_xlm);
@@ -207,6 +229,8 @@ impl ManagedLiquidityVaultContract {
             &DataKey::FreePrincipalXlm,
             &(partner_principal - target_reserved_xlm),
         );
+        // `LastSetReserve*` fields are audit metadata only. They are not used for
+        // authorization and do not affect balances after validation succeeds.
         instance.set(&DataKey::LastSetReserveCredit, &reference_credit_usdt0);
         instance.set(&DataKey::LastSetReserveExchangeRate, &exchange_rate);
         instance.set(&DataKey::LastReserveReferenceHash, &reference_hash);
@@ -243,6 +267,8 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::YieldPaidExceedsDebtAndCurrentDue);
         }
 
+        // `yield_paid_usdt0` must be backed by an actual token transfer. Unpaid
+        // yield remains as debt and is not treated as collectible balance.
         if yield_paid_usdt0 > 0 {
             yield_client(&env).transfer(
                 &get_address(&env, &DataKey::Exchange),
@@ -282,6 +308,8 @@ impl ManagedLiquidityVaultContract {
         }
         require_exchange_auth(&env);
 
+        // This method is intentionally one-way favorable to the funding partner:
+        // it can only reduce debt and/or increase collected yield.
         let exchange = get_address(&env, &DataKey::Exchange);
         yield_client(&env).transfer(&exchange, &env.current_contract_address(), &amount_usdt0);
 
@@ -411,6 +439,8 @@ impl ManagedLiquidityVaultContract {
 
 impl UpgradeableInternal for ManagedLiquidityVaultContract {
     fn _require_auth(e: &Env, operator: &Address) {
+        // Upgrades are intentionally separated from business roles. The contract
+        // owner is the sole upgrade authority and should be a governance address.
         operator.require_auth();
         let owner = ownable::get_owner(e).unwrap();
         if *operator != owner {
@@ -429,6 +459,35 @@ fn get_i128(env: &Env, key: &DataKey) -> i128 {
 
 fn get_u64(env: &Env, key: &DataKey) -> u64 {
     env.storage().instance().get(key).unwrap()
+}
+
+fn ensure_reserve_covers_credit(
+    _env: &Env,
+    target_reserved_xlm: i128,
+    reference_credit_usdt0: i128,
+    exchange_rate: i128,
+) -> Result<(), ContractError> {
+    if reference_credit_usdt0 == 0 {
+        return Ok(());
+    }
+    if exchange_rate <= 0 {
+        return Err(ContractError::ExchangeRateMustBePositive);
+    }
+
+    // `exchange_rate` is fixed-point USDT0 per 1 XLM, scaled by `RATE_SCALE`.
+    // The check enforces 100% mark-value coverage only:
+    // reserved_xlm * price >= reference_credit_usdt0.
+    let covered_credit = checked_mul(target_reserved_xlm, exchange_rate)?;
+    let covered_credit = covered_credit / RATE_SCALE;
+    if covered_credit < reference_credit_usdt0 {
+        return Err(ContractError::ReserveBelowRequiredCollateral);
+    }
+    Ok(())
+}
+
+fn checked_mul(lhs: i128, rhs: i128) -> Result<i128, ContractError> {
+    lhs.checked_mul(rhs)
+        .ok_or(ContractError::ArithmeticOverflow)
 }
 
 fn require_exchange_auth(env: &Env) {
