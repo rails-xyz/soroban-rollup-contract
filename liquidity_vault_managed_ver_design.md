@@ -285,15 +285,16 @@ This method records the exchange's settlement accounting without moving `XLM` ou
 
 If there is no external settlement package for that update, the empty value should clear the previous yield reference rather than keep an older hash.
 
-##### pay_yield(amount_usdt0)
+##### pay_yield(from, amount_usdt0)
 
-`Exchange`\-only.
+Any approved payer.
 
 - Transfers `USDT0` into the vault.
 - Reduces `YieldDebtUsdt0` by up to the paid amount.
 - Increases `CollectedYieldUsdt0`.
 
-This is safe as an exchange-only method because it can only improve partner position.
+This is safe because it can only improve partner position by reducing debt and/or
+increasing collected yield.
 
 ##### withdraw_partner_yield(to, amount_usdt0)
 

@@ -12,7 +12,11 @@ pub trait Contract {
         operator: soroban_sdk::Address,
     );
     fn exchange(env: soroban_sdk::Env) -> soroban_sdk::Address;
-    fn pay_yield(env: soroban_sdk::Env, amount_usdt0: i128) -> Result<(), ContractError>;
+    fn pay_yield(
+        env: soroban_sdk::Env,
+        from: soroban_sdk::Address,
+        amount_usdt0: i128,
+    ) -> Result<(), ContractError>;
     fn xlm_token(env: soroban_sdk::Env) -> soroban_sdk::Address;
     fn set_reserve(
         env: soroban_sdk::Env,
@@ -324,4 +328,3 @@ pub struct Paused {}
 #[soroban_sdk::contractevent(export = false, topics = ["unpaused"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Unpaused {}
-

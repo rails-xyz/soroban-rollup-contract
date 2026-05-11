@@ -4,8 +4,8 @@
 //! - one `FundingPartner` deposits and withdraws `XLM` principal,
 //! - one `Exchange` reserves deposited `XLM` as collateral for off-chain
 //!   internal credit and market making,
-//! - yield is paid in a separate `USDT0`-like token and can only be withdrawn
-//!   by the `FundingPartner`,
+//! - yield is paid in a separate `USDT0`-like token by an approved payer and
+//!   can only be withdrawn by the `FundingPartner`,
 //! - and upgrade authority is delegated to a separate governance `owner`.
 //!
 //! The reserve model is intentionally simple. The contract only checks that the
@@ -127,7 +127,7 @@ impl ManagedLiquidityVaultContract {
     ///
     /// * `env` - Access to the Soroban environment.
     /// * `xlm_token` - Token contract used as vault principal and collateral.
-    /// * `yield_token` - Token contract used for exchange-paid yield.
+    /// * `yield_token` - Token contract used for externally paid yield.
     /// * `exchange` - Address authorized to manage reserve and yield
     ///   settlement.
     /// * `funding_partner` - Address authorized to deposit principal and
@@ -428,6 +428,7 @@ impl ManagedLiquidityVaultContract {
     /// # Arguments
     ///
     /// * `env` - Access to the Soroban environment.
+    /// * `from` - Address supplying the yield token transfer.
     /// * `amount_usdt0` - Amount of yield token to transfer into the vault.
     ///
     /// # Errors
@@ -436,17 +437,16 @@ impl ManagedLiquidityVaultContract {
     ///
     /// # Notes
     ///
-    /// * Authorization from `Exchange` is required.
+    /// * Authorization from `from` is required at the root invocation.
     /// * This method can only improve the funding partner position by reducing
     ///   debt and/or increasing collected yield.
-    pub fn pay_yield(env: Env, amount_usdt0: i128) -> Result<(), ContractError> {
+    pub fn pay_yield(env: Env, from: Address, amount_usdt0: i128) -> Result<(), ContractError> {
         if amount_usdt0 <= 0 {
             return Err(ContractError::YieldAmountMustBePositive);
         }
-        require_exchange_auth(&env);
+        from.require_auth();
 
-        let exchange = get_address(&env, &DataKey::Exchange);
-        yield_client(&env).transfer(&exchange, &env.current_contract_address(), &amount_usdt0);
+        yield_client(&env).transfer(&from, &env.current_contract_address(), &amount_usdt0);
 
         let debt = get_i128(&env, &DataKey::YieldDebtUsdt0);
         let collected = get_i128(&env, &DataKey::CollectedYieldUsdt0);

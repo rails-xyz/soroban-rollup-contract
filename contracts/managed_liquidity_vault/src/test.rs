@@ -146,7 +146,7 @@ fn test_record_and_pay_yield_then_withdraw() {
     assert_eq!(client.last_reserve_reference_hash(), None);
 
     yield_client.approve(&exchange, &client.address, &later_payment, &LEDGER_BUMP);
-    client.pay_yield(&later_payment);
+    client.pay_yield(&exchange, &later_payment);
 
     assert_eq!(
         client.collected_yield_usdt0(),
@@ -164,6 +164,55 @@ fn test_record_and_pay_yield_then_withdraw() {
         yield_client.balance(&funding_partner),
         partner_initial + settlement_paid + later_payment
     );
+}
+
+#[test]
+fn test_pay_yield_accepts_alternate_payer() {
+    let env = Env::default();
+    let (_owner, exchange, _funding_partner, _xlm_client, yield_client, client) =
+        deploy_fixture(&env);
+
+    let fee_wallet = Address::generate(&env);
+    let settlement_due = 10_0000000;
+    let settlement_paid = 4_0000000;
+    let later_payment = 2_0000000;
+
+    yield_client.approve(&exchange, &client.address, &settlement_paid, &LEDGER_BUMP);
+    client.record_yield_settlement(&1u64, &settlement_due, &settlement_paid, &None);
+
+    yield_client.transfer(&exchange, &fee_wallet, &later_payment);
+    yield_client.approve(&fee_wallet, &client.address, &later_payment, &LEDGER_BUMP);
+    client.pay_yield(&fee_wallet, &later_payment);
+
+    assert_eq!(
+        client.collected_yield_usdt0(),
+        settlement_paid + later_payment
+    );
+    assert_eq!(
+        client.yield_debt_usdt0(),
+        settlement_due - settlement_paid - later_payment
+    );
+}
+
+#[test]
+fn test_pay_yield_records_payer_not_exchange_auth() {
+    let env = Env::default();
+    let (_owner, exchange, _funding_partner, _xlm_client, yield_client, client) =
+        deploy_fixture(&env);
+
+    let fee_wallet = Address::generate(&env);
+    let payment = 2_0000000;
+
+    yield_client.transfer(&exchange, &fee_wallet, &payment);
+    yield_client.approve(&fee_wallet, &client.address, &payment, &LEDGER_BUMP);
+
+    let _ = env.auths();
+    client.pay_yield(&fee_wallet, &payment);
+
+    let auths = env.auths();
+    let addresses: std::vec::Vec<_> = auths.into_iter().map(|(addr, _)| addr).collect();
+    assert!(addresses.contains(&fee_wallet));
+    assert!(!addresses.contains(&exchange));
 }
 
 #[test]
