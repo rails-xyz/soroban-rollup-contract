@@ -69,6 +69,32 @@ fn deploy_fixture(
     )
 }
 
+fn assert_contract_error<F>(f: F, code: u32)
+where
+    F: FnOnce(),
+{
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_err();
+    let message = if let Some(message) = panic.downcast_ref::<std::string::String>() {
+        message.clone()
+    } else if let Some(message) = panic.downcast_ref::<&'static str>() {
+        std::string::String::from(*message)
+    } else {
+        std::string::String::from("<non-string panic>")
+    };
+
+    assert!(
+        message.contains(&std::format!("Error(Contract, #{code})")),
+        "expected contract error #{code}, got: {message}"
+    );
+}
+
+fn assert_panics<F>(f: F)
+where
+    F: FnOnce(),
+{
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).is_err());
+}
+
 #[test]
 fn test_deployment() {
     let env = Env::default();
@@ -374,4 +400,102 @@ fn test_set_reserve_rejects_under_collateralized_target() {
     client.deposit_partner(&deposit_amount);
 
     client.set_reserve(&1_599_9999999, &160_0000000, &1_000000, &reference_hash);
+}
+
+#[test]
+fn test_validation_errors_and_renounce_ownership() {
+    let env = Env::default();
+    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
+        deploy_fixture(&env);
+
+    let deposit_amount = 10_000_0000000;
+    xlm_client.approve(
+        &funding_partner,
+        &client.address,
+        &deposit_amount,
+        &LEDGER_BUMP,
+    );
+    client.deposit_partner(&deposit_amount);
+
+    assert_contract_error(|| client.deposit_partner(&0), 1);
+    assert_contract_error(|| client.withdraw_partner_principal(&funding_partner, &0), 2);
+    assert_contract_error(|| client.pay_yield(&funding_partner, &0), 3);
+    assert_contract_error(|| client.withdraw_partner_yield(&funding_partner, &0), 3);
+    assert_contract_error(|| client.withdraw_partner_yield(&funding_partner, &1), 7);
+    assert_contract_error(|| client.renounce_ownership(), 14);
+}
+
+#[test]
+fn test_set_reserve_validation_errors() {
+    let env = Env::default();
+    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
+        deploy_fixture(&env);
+
+    let deposit_amount = 10_000_0000000;
+    xlm_client.approve(
+        &funding_partner,
+        &client.address,
+        &deposit_amount,
+        &LEDGER_BUMP,
+    );
+    client.deposit_partner(&deposit_amount);
+
+    assert_contract_error(|| client.set_reserve(&-1, &0, &0, &None), 4);
+    assert_contract_error(|| client.set_reserve(&0, &-1, &0, &None), 13);
+    assert_contract_error(|| client.set_reserve(&(deposit_amount + 1), &0, &0, &None), 5);
+    assert_contract_error(|| client.set_reserve(&1, &1, &0, &None), 16);
+}
+
+#[test]
+fn test_record_yield_settlement_validation_errors() {
+    let env = Env::default();
+    let (_owner, exchange, _funding_partner, _xlm_client, yield_client, client) =
+        deploy_fixture(&env);
+
+    assert_contract_error(|| client.record_yield_settlement(&1, &-1, &0, &None), 8);
+
+    yield_client.approve(&exchange, &client.address, &1_0000000, &LEDGER_BUMP);
+    client.record_yield_settlement(&1, &1_0000000, &1_0000000, &None);
+
+    assert_contract_error(|| client.record_yield_settlement(&1, &0, &0, &None), 10);
+    assert_contract_error(|| client.record_yield_settlement(&2, &1_0000000, &1_0000001, &None), 9);
+}
+
+#[test]
+fn test_zero_credit_reserve_and_yield_balance() {
+    let env = Env::default();
+    let (_owner, exchange, funding_partner, xlm_client, yield_client, client) =
+        deploy_fixture(&env);
+
+    let deposit_amount = 10_000_0000000;
+    let settlement_paid = 3_0000000;
+
+    xlm_client.approve(
+        &funding_partner,
+        &client.address,
+        &deposit_amount,
+        &LEDGER_BUMP,
+    );
+    client.deposit_partner(&deposit_amount);
+    client.set_reserve(&deposit_amount, &0, &0, &None);
+
+    yield_client.approve(&exchange, &client.address, &settlement_paid, &LEDGER_BUMP);
+    client.record_yield_settlement(&1, &settlement_paid, &settlement_paid, &None);
+
+    assert_eq!(client.free_principal_xlm(), 0);
+    assert_eq!(client.reserved_for_exchange_xlm(), deposit_amount);
+    assert_eq!(client.yield_balance(), settlement_paid);
+}
+
+#[test]
+fn test_upgrade_owner_gate() {
+    let env = Env::default();
+    let (owner, _exchange, _funding_partner, _xlm_client, _yield_client, client) =
+        deploy_fixture(&env);
+
+    let wasm_hash = BytesN::from_array(&env, &[8; 32]);
+    let non_owner = Address::generate(&env);
+
+    assert_contract_error(|| client.upgrade(&wasm_hash, &non_owner), 15);
+    assert_panics(|| client.upgrade(&wasm_hash, &owner));
 }

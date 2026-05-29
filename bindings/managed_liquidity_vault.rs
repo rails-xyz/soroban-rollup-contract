@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/managed_liquidity_vault.wasm", sha256 =
-    "9ae93c80d4f12e5595ad6daefb08cd7c9473fe01b324d30cecd972e0bcfdcc35"
+    "9b6b2dea336bd696c5b92283e14d3ee7eaad4b0afe02c88d545b2ee4780471b1"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -328,3 +328,4 @@ pub struct Paused {}
 #[soroban_sdk::contractevent(export = false, topics = ["unpaused"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Unpaused {}
+
