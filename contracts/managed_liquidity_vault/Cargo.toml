@@ -13,6 +13,12 @@ soroban-sdk = { workspace = true }
 stellar-access = "0.5.0"
 stellar-contract-utils = "0.5.0"
 stellar-macros = "0.5.0"
+cvlr = { version = "0.4.1", default-features = false, optional = true }
+cvlr-soroban = { version = "0.4.0", optional = true }
+cvlr-soroban-derive = { version = "0.4.0", optional = true }
+
+[features]
+certora = ["dep:cvlr", "dep:cvlr-soroban", "dep:cvlr-soroban-derive"]
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

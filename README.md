@@ -53,6 +53,28 @@ stellar contract bindings rust --wasm ./target/wasm32v1-none/release/rollup_cont
 
 ```
 
+## Certora
+
+Simple Sunbeam scaffolding for `managed_liquidity_vault` lives under `certora/` and `contracts/managed_liquidity_vault/src/certora/`.
+
+```bash
+# Activate the local Python environment so certoraSorobanProver is on PATH
+source .venv/bin/activate
+
+# Run a local compilation-only check
+cd certora
+certoraSorobanProver managed_liquidity_vault.conf --compilation_steps_only --short_output
+
+# Run the full prover job after setting CERTORAKEY
+certoraSorobanProver managed_liquidity_vault.conf
+```
+
+Notes:
+
+- The build script targets the Soroban artifact produced at `target/wasm32v1-none/release/managed_liquidity_vault.wasm`.
+- A workspace-local Cargo config in `.cargo/config.toml` disables a global GitHub HTTPS-to-SSH rewrite so public Certora dependencies can be fetched reliably.
+- If you prefer not to activate the virtualenv, run `../.venv/bin/certoraSorobanProver` from the `certora/` directory instead.
+
 ## Environment Setup
 
 We have a TESTNET Stellar Node live on staging. You can access this node with stellar cli by adding a network configuration:
