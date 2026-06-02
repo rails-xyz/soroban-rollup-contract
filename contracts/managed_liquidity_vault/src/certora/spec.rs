@@ -7,7 +7,7 @@ use soroban_sdk::{Address, Env};
 
 #[rule]
 fn sanity(env: Env, addr: Address) {
-    let _ = ManagedLiquidityVaultContract::owner(env);
+    let _ = ManagedLiquidityVaultContract::exchange(env);
     let _ = addr;
     cvlr_satisfy!(true);
 }

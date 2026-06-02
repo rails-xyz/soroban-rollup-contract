@@ -1,7 +1,7 @@
 #![no_std]
 
-mod contract;
 #[cfg(feature = "certora")]
 mod certora;
+mod contract;
 #[cfg(test)]
 mod test;

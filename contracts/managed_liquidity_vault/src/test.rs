@@ -2,8 +2,9 @@ extern crate std;
 
 use soroban_sdk::{
     testutils::Address as _,
+    testutils::{MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
-    Address, BytesN, Env,
+    Address, BytesN, Env, IntoVal,
 };
 
 use super::contract::{ManagedLiquidityVaultContract, ManagedLiquidityVaultContractClient};
@@ -28,14 +29,12 @@ fn deploy_fixture(
 ) -> (
     Address,
     Address,
-    Address,
     TokenClient<'_>,
     TokenClient<'_>,
     ManagedLiquidityVaultContractClient<'_>,
 ) {
     env.mock_all_auths();
 
-    let owner = Address::generate(env);
     let exchange = Address::generate(env);
     let funding_partner = Address::generate(env);
 
@@ -51,7 +50,6 @@ fn deploy_fixture(
             &yield_client.address,
             &exchange,
             &funding_partner,
-            &owner,
         ),
     );
     let client = ManagedLiquidityVaultContractClient::new(env, &contract_id);
@@ -59,14 +57,7 @@ fn deploy_fixture(
     xlm_admin_client.mint(&funding_partner, &20_000_0000000);
     yield_admin_client.mint(&exchange, &20_000_0000000);
 
-    (
-        owner,
-        exchange,
-        funding_partner,
-        xlm_client,
-        yield_client,
-        client,
-    )
+    (exchange, funding_partner, xlm_client, yield_client, client)
 }
 
 fn assert_contract_error<F>(f: F, code: u32)
@@ -98,9 +89,8 @@ where
 #[test]
 fn test_deployment() {
     let env = Env::default();
-    let (owner, exchange, funding_partner, xlm_client, yield_client, client) = deploy_fixture(&env);
+    let (exchange, funding_partner, xlm_client, yield_client, client) = deploy_fixture(&env);
 
-    assert_eq!(client.owner(), Some(owner));
     assert_eq!(client.exchange(), exchange);
     assert_eq!(client.funding_partner(), funding_partner);
     assert_eq!(client.xlm_token(), xlm_client.address);
@@ -118,8 +108,7 @@ fn test_deployment() {
 #[test]
 fn test_deposit_and_set_reserve() {
     let env = Env::default();
-    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     let reserve_target = 2_000_0000000;
@@ -154,8 +143,7 @@ fn test_deposit_and_set_reserve() {
 #[test]
 fn test_record_and_pay_yield_then_withdraw() {
     let env = Env::default();
-    let (_owner, exchange, funding_partner, _xlm_client, yield_client, client) =
-        deploy_fixture(&env);
+    let (exchange, funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
 
     let settlement_paid = 4_0000000;
     let settlement_due = 10_0000000;
@@ -195,8 +183,7 @@ fn test_record_and_pay_yield_then_withdraw() {
 #[test]
 fn test_pay_yield_accepts_alternate_payer() {
     let env = Env::default();
-    let (_owner, exchange, _funding_partner, _xlm_client, yield_client, client) =
-        deploy_fixture(&env);
+    let (exchange, _funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
 
     let fee_wallet = Address::generate(&env);
     let settlement_due = 10_0000000;
@@ -223,8 +210,7 @@ fn test_pay_yield_accepts_alternate_payer() {
 #[test]
 fn test_pay_yield_records_payer_not_exchange_auth() {
     let env = Env::default();
-    let (_owner, exchange, _funding_partner, _xlm_client, yield_client, client) =
-        deploy_fixture(&env);
+    let (exchange, _funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
 
     let fee_wallet = Address::generate(&env);
     let payment = 2_0000000;
@@ -244,8 +230,7 @@ fn test_pay_yield_records_payer_not_exchange_auth() {
 #[test]
 fn test_withdraw_partner_principal_updates_balances() {
     let env = Env::default();
-    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     let reserve_target = 2_000_0000000;
@@ -278,10 +263,7 @@ fn test_withdraw_partner_principal_updates_balances() {
         deposit_amount - reserve_target - withdraw_amount
     );
     assert_eq!(client.reserved_for_exchange_xlm(), reserve_target);
-    assert_eq!(
-        client.last_reserve_reference_hash(),
-        reserve_reference_hash
-    );
+    assert_eq!(client.last_reserve_reference_hash(), reserve_reference_hash);
     assert_eq!(
         xlm_client.balance(&funding_partner),
         initial_partner_balance + withdraw_amount
@@ -291,8 +273,7 @@ fn test_withdraw_partner_principal_updates_balances() {
 #[test]
 fn test_withdraw_partner_principal_records_dual_auth() {
     let env = Env::default();
-    let (_owner, exchange, funding_partner, xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     let reserve_target = 2_000_0000000;
@@ -326,8 +307,7 @@ fn test_withdraw_partner_principal_records_dual_auth() {
 #[should_panic(expected = "Error(Contract, #6)")]
 fn test_withdraw_partner_principal_exceeds_free_principal_panics() {
     let env = Env::default();
-    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     let reserve_reference_hash = Some(BytesN::from_array(&env, &[5; 32]));
@@ -352,8 +332,7 @@ fn test_withdraw_partner_principal_exceeds_free_principal_panics() {
 #[test]
 fn test_set_reserve_can_clear_reference_hash_for_fx_only_update() {
     let env = Env::default();
-    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     let initial_reference_hash = Some(BytesN::from_array(&env, &[6; 32]));
@@ -385,8 +364,7 @@ fn test_set_reserve_can_clear_reference_hash_for_fx_only_update() {
 #[should_panic(expected = "Error(Contract, #17)")]
 fn test_set_reserve_rejects_under_collateralized_target() {
     let env = Env::default();
-    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     let reference_hash = Some(BytesN::from_array(&env, &[7; 32]));
@@ -405,8 +383,7 @@ fn test_set_reserve_rejects_under_collateralized_target() {
 #[test]
 fn test_validation_errors_and_renounce_ownership() {
     let env = Env::default();
-    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     xlm_client.approve(
@@ -418,7 +395,10 @@ fn test_validation_errors_and_renounce_ownership() {
     client.deposit_partner(&deposit_amount);
 
     assert_contract_error(|| client.deposit_partner(&0), 1);
-    assert_contract_error(|| client.withdraw_partner_principal(&funding_partner, &0), 2);
+    assert_contract_error(
+        || client.withdraw_partner_principal(&funding_partner, &0),
+        2,
+    );
     assert_contract_error(|| client.pay_yield(&funding_partner, &0), 3);
     assert_contract_error(|| client.withdraw_partner_yield(&funding_partner, &0), 3);
     assert_contract_error(|| client.withdraw_partner_yield(&funding_partner, &1), 7);
@@ -428,8 +408,7 @@ fn test_validation_errors_and_renounce_ownership() {
 #[test]
 fn test_set_reserve_validation_errors() {
     let env = Env::default();
-    let (_owner, _exchange, funding_partner, xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     xlm_client.approve(
@@ -442,15 +421,17 @@ fn test_set_reserve_validation_errors() {
 
     assert_contract_error(|| client.set_reserve(&-1, &0, &0, &None), 4);
     assert_contract_error(|| client.set_reserve(&0, &-1, &0, &None), 13);
-    assert_contract_error(|| client.set_reserve(&(deposit_amount + 1), &0, &0, &None), 5);
+    assert_contract_error(
+        || client.set_reserve(&(deposit_amount + 1), &0, &0, &None),
+        5,
+    );
     assert_contract_error(|| client.set_reserve(&1, &1, &0, &None), 16);
 }
 
 #[test]
 fn test_record_yield_settlement_validation_errors() {
     let env = Env::default();
-    let (_owner, exchange, _funding_partner, _xlm_client, yield_client, client) =
-        deploy_fixture(&env);
+    let (exchange, _funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
 
     assert_contract_error(|| client.record_yield_settlement(&1, &-1, &0, &None), 8);
 
@@ -458,14 +439,16 @@ fn test_record_yield_settlement_validation_errors() {
     client.record_yield_settlement(&1, &1_0000000, &1_0000000, &None);
 
     assert_contract_error(|| client.record_yield_settlement(&1, &0, &0, &None), 10);
-    assert_contract_error(|| client.record_yield_settlement(&2, &1_0000000, &1_0000001, &None), 9);
+    assert_contract_error(
+        || client.record_yield_settlement(&2, &1_0000000, &1_0000001, &None),
+        9,
+    );
 }
 
 #[test]
 fn test_zero_credit_reserve_and_yield_balance() {
     let env = Env::default();
-    let (_owner, exchange, funding_partner, xlm_client, yield_client, client) =
-        deploy_fixture(&env);
+    let (exchange, funding_partner, xlm_client, yield_client, client) = deploy_fixture(&env);
 
     let deposit_amount = 10_000_0000000;
     let settlement_paid = 3_0000000;
@@ -488,14 +471,73 @@ fn test_zero_credit_reserve_and_yield_balance() {
 }
 
 #[test]
-fn test_upgrade_owner_gate() {
+fn test_upgrade_requires_exchange_and_funding_partner_auth() {
     let env = Env::default();
-    let (owner, _exchange, _funding_partner, _xlm_client, _yield_client, client) =
-        deploy_fixture(&env);
+    let (exchange, funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let wasm_hash = BytesN::from_array(&env, &[8; 32]);
-    let non_owner = Address::generate(&env);
+    let outsider = Address::generate(&env);
 
-    assert_contract_error(|| client.upgrade(&wasm_hash, &non_owner), 15);
-    assert_panics(|| client.upgrade(&wasm_hash, &owner));
+    assert_contract_error(|| client.upgrade(&wasm_hash, &outsider), 15);
+    assert_panics(|| {
+        client
+            .mock_auths(&[MockAuth {
+                address: &exchange,
+                invoke: &MockAuthInvoke {
+                    contract: &client.address,
+                    fn_name: "upgrade",
+                    args: (&wasm_hash, &exchange).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .upgrade(&wasm_hash, &exchange)
+    });
+    assert_panics(|| {
+        client
+            .mock_auths(&[
+                MockAuth {
+                    address: &exchange,
+                    invoke: &MockAuthInvoke {
+                        contract: &client.address,
+                        fn_name: "upgrade",
+                        args: (&wasm_hash, &exchange).into_val(&env),
+                        sub_invokes: &[],
+                    },
+                },
+                MockAuth {
+                    address: &funding_partner,
+                    invoke: &MockAuthInvoke {
+                        contract: &client.address,
+                        fn_name: "upgrade",
+                        args: (&wasm_hash, &exchange).into_val(&env),
+                        sub_invokes: &[],
+                    },
+                },
+            ])
+            .upgrade(&wasm_hash, &outsider)
+    });
+    assert_panics(|| {
+        client
+            .mock_auths(&[
+                MockAuth {
+                    address: &exchange,
+                    invoke: &MockAuthInvoke {
+                        contract: &client.address,
+                        fn_name: "upgrade",
+                        args: (&wasm_hash, &exchange).into_val(&env),
+                        sub_invokes: &[],
+                    },
+                },
+                MockAuth {
+                    address: &funding_partner,
+                    invoke: &MockAuthInvoke {
+                        contract: &client.address,
+                        fn_name: "upgrade",
+                        args: (&wasm_hash, &exchange).into_val(&env),
+                        sub_invokes: &[],
+                    },
+                },
+            ])
+            .upgrade(&wasm_hash, &exchange)
+    });
 }

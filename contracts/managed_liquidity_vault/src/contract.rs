@@ -6,7 +6,8 @@
 //!   internal credit and market making,
 //! - yield is paid in a separate `USDT0`-like token by an approved payer and
 //!   can only be withdrawn by the `FundingPartner`,
-//! - and upgrade authority is delegated to a separate governance `owner`.
+//! - and upgrades require both the `Exchange` and `FundingPartner` to
+//!   authorize them.
 //!
 //! The reserve model is intentionally simple. The contract only checks that the
 //! posted reserve covers the stated credit using a fixed-point exchange rate.
@@ -15,7 +16,6 @@ use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
     BytesN, Env,
 };
-use stellar_access::ownable;
 use stellar_contract_utils::upgradeable::UpgradeableInternal;
 use stellar_macros::Upgradeable;
 
@@ -132,11 +132,11 @@ impl ManagedLiquidityVaultContract {
     ///   settlement.
     /// * `funding_partner` - Address authorized to deposit principal and
     ///   withdraw collected yield.
-    /// * `owner` - Upgrade-only governance address.
     ///
     /// # Notes
     ///
-    /// * `owner` is not used for normal vault operations.
+    /// * Upgrades require both the configured `Exchange` and
+    ///   `FundingPartner`.
     /// * Principal and yield balances are initialized to zero.
     pub fn __constructor(
         env: Env,
@@ -144,9 +144,7 @@ impl ManagedLiquidityVaultContract {
         yield_token: Address,
         exchange: Address,
         funding_partner: Address,
-        owner: Address,
     ) {
-        ownable::set_owner(&env, &owner);
         let instance = env.storage().instance();
         instance.set(&DataKey::XlmToken, &xlm_token);
         instance.set(&DataKey::YieldToken, &yield_token);
@@ -160,7 +158,10 @@ impl ManagedLiquidityVaultContract {
         instance.set(&DataKey::LatestSettlementEpoch, &0u64);
         instance.set(&DataKey::LastSetReserveExchangeRate, &0i128);
         instance.set(&DataKey::LastSetReserveCredit, &0i128);
-        instance.set(&DataKey::LastReserveReferenceHash, &Option::<BytesN<32>>::None);
+        instance.set(
+            &DataKey::LastReserveReferenceHash,
+            &Option::<BytesN<32>>::None,
+        );
         instance.set(
             &DataKey::LastYieldSettlementReferenceHash,
             &Option::<BytesN<32>>::None,
@@ -409,10 +410,7 @@ impl ManagedLiquidityVaultContract {
             &(total_obligation - yield_paid_usdt0),
         );
         instance.set(&DataKey::LatestSettlementEpoch, &epoch_id);
-        instance.set(
-            &DataKey::LastYieldSettlementReferenceHash,
-            &reference_hash,
-        );
+        instance.set(&DataKey::LastYieldSettlementReferenceHash, &reference_hash);
 
         env.events().publish_event(&YieldSettlementEvt {
             epoch_id,
@@ -519,11 +517,6 @@ impl ManagedLiquidityVaultContract {
         Err(ContractError::RenounceOwnershipDisabled)
     }
 
-    /// Returns the upgrade-only governance owner.
-    pub fn owner(env: Env) -> Option<Address> {
-        ownable::get_owner(&env)
-    }
-
     /// Returns the exchange address.
     pub fn exchange(env: Env) -> Address {
         get_address(&env, &DataKey::Exchange)
@@ -614,10 +607,13 @@ impl ManagedLiquidityVaultContract {
 impl UpgradeableInternal for ManagedLiquidityVaultContract {
     fn _require_auth(e: &Env, operator: &Address) {
         operator.require_auth();
-        let owner = ownable::get_owner(e).unwrap();
-        if *operator != owner {
+        let exchange = get_address(e, &DataKey::Exchange);
+        let funding_partner = get_address(e, &DataKey::FundingPartner);
+        if *operator != exchange && *operator != funding_partner {
             panic_with_error!(e, ContractError::Unauthorized);
         }
+        exchange.require_auth();
+        funding_partner.require_auth();
     }
 }
 
