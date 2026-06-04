@@ -1,0 +1,94 @@
+Public Report URL: https://prover.certora.com/output/1665492/70980fe5aff54f0e8622daded25a8fbc/?anonymousKey=d01b8e7d02b8103d5911df03332d54b1c60abb28
+
+Result:
+Start Mon Jun 01 16:16:19 GMT 2026
+Start Mon Jun 01 16:16:19 GMT 2026
+Running initial transformations
+[ForkJoinPool-1-worker-5] WARN ALWAYS - sanity: failed to scalarize memory accesses
+[ForkJoinPool-1-worker-5] WARN ALWAYS - Unable to optimize memory accesses for sanity
+[ForkJoinPool-1-worker-5] WARN WASM_ANALYSIS - Scalar Inference: sanity - LTACCmd(ptr=CmdPointer(block=19_0_0_0_0_47, pos=3), cmd=AssignExpCmd R35:bv256 Select(tacSoroObjDigest:ghostmap(bv256->bv256) R64:bv256) ) unifies 'Sym' and 'Top'
+[ForkJoinPool-1-worker-2] WARN ALWAYS - withdraw_yield_rejects_non_positive_amount: failed to scalarize memory accesses
+[ForkJoinPool-1-worker-2] WARN ALWAYS - Unable to optimize memory accesses for withdraw_yield_rejects_non_positive_amount
+[ForkJoinPool-1-worker-7] WARN ALWAYS - pay_yield_rejects_non_positive_amount: failed to scalarize memory accesses
+[ForkJoinPool-1-worker-7] WARN ALWAYS - Unable to optimize memory accesses for pay_yield_rejects_non_positive_amount
+[ForkJoinPool-1-worker-4] WARN ALWAYS - deposit_rejects_non_positive_amount: failed to scalarize memory accesses
+[ForkJoinPool-1-worker-4] WARN ALWAYS - Unable to optimize memory accesses for deposit_rejects_non_positive_amount
+[ForkJoinPool-1-worker-1] WARN ALWAYS - withdraw_principal_rejects_non_positive_amount: failed to scalarize memory accesses
+[ForkJoinPool-1-worker-1] WARN ALWAYS - Unable to optimize memory accesses for withdraw_principal_rejects_non_positive_amount
+Ping 1m - 
+[ForkJoinPool-1-worker-8] WARN ALWAYS - set_reserve_rejects_negative_audit_values: failed to scalarize memory accesses
+[ForkJoinPool-1-worker-8] WARN ALWAYS - Unable to optimize memory accesses for set_reserve_rejects_negative_audit_values
+[ForkJoinPool-1-worker-3] WARN ALWAYS - set_reserve_rejects_negative_target: failed to scalarize memory accesses
+[ForkJoinPool-1-worker-3] WARN ALWAYS - Unable to optimize memory accesses for set_reserve_rejects_negative_target
+[ForkJoinPool-1-worker-2] WARN WASM_ANALYSIS - Scalar Inference: withdraw_yield_rejects_non_positive_amount - LTACCmd(ptr=CmdPointer(block=1066_0_0_0_0_0, pos=33), cmd=AssignExpCmd R2172:bv256 R2160:bv256 ) unifies 'Sym' and 'Top'
+[ForkJoinPool-1-worker-6] WARN ALWAYS - record_yield_settlement_rejects_negative_amounts: failed to scalarize memory accesses
+[ForkJoinPool-1-worker-6] WARN ALWAYS - Unable to optimize memory accesses for record_yield_settlement_rejects_negative_amounts
+[ForkJoinPool-1-worker-7] WARN WASM_ANALYSIS - Scalar Inference: pay_yield_rejects_non_positive_amount - LTACCmd(ptr=CmdPointer(block=1078_0_0_0_0_0, pos=33), cmd=AssignExpCmd R2182:bv256 R2170:bv256 ) unifies 'Sym' and 'Top'
+Ping 2m - 
+[ForkJoinPool-1-worker-4] WARN WASM_ANALYSIS - Scalar Inference: deposit_rejects_non_positive_amount - LTACCmd(ptr=CmdPointer(block=1088_0_0_0_0_0, pos=33), cmd=AssignExpCmd R2176:bv256 R2164:bv256 ) unifies 'Sym' and 'Top'
+[ForkJoinPool-1-worker-1] WARN WASM_ANALYSIS - Scalar Inference: withdraw_principal_rejects_non_positive_amount - LTACCmd(ptr=CmdPointer(block=1082_0_0_0_0_0, pos=33), cmd=AssignExpCmd R2183:bv256 R2171:bv256 ) unifies 'Sym' and 'Top'
+Ping 3m - 
+[ForkJoinPool-1-worker-3] WARN WASM_ANALYSIS - Scalar Inference: set_reserve_rejects_negative_target - LTACCmd(ptr=CmdPointer(block=1086_0_0_0_0_0, pos=33), cmd=AssignExpCmd R3604:bv256 R3592:bv256 ) unifies 'Sym' and 'Top'
+[ForkJoinPool-1-worker-8] WARN WASM_ANALYSIS - Scalar Inference: set_reserve_rejects_negative_audit_values - LTACCmd(ptr=CmdPointer(block=1092_0_0_0_0_0, pos=33), cmd=AssignExpCmd R3622:bv256 R3610:bv256 ) unifies 'Sym' and 'Top'
+Ping 4m - 
+Ping 5m - 
+[ForkJoinPool-1-worker-6] WARN WASM_ANALYSIS - Scalar Inference: record_yield_settlement_rejects_negative_amounts - LTACCmd(ptr=CmdPointer(block=1100_0_0_0_0_0, pos=33), cmd=AssignExpCmd R3594:bv256 R3582:bv256 ) unifies 'Sym' and 'Top'
+Completed initial transformations
+Verified: renounce_ownership_is_disabled-Assertions
+renounce_ownership_is_disabled-Assertions: Properties successfully verified on all inputs
+Total time for sanity: 1 seconds ; Split time: 0 seconds ; Number of problems: 1 ; Solver time : 0 seconds
+Verified: sanity
+sanity: Properties successfully verified on all inputs
+Total time for pay_yield_rejects_non_positive_amount: 1 seconds ; Split time: 0 seconds ; Number of problems: 1 ; Solver time : 0 seconds
+Verified: pay_yield_rejects_non_positive_amount-Assertions
+pay_yield_rejects_non_positive_amount-Assertions: Properties successfully verified on all inputs
+Total time for deposit_rejects_non_positive_amount: 2 seconds ; Split time: 0 seconds ; Number of problems: 1 ; Solver time : 2 seconds
+Verified: deposit_rejects_non_positive_amount-Assertions
+deposit_rejects_non_positive_amount-Assertions: Properties successfully verified on all inputs
+Total time for withdraw_yield_rejects_non_positive_amount: 7 seconds ; Split time: 0 seconds ; Number of problems: 1 ; Solver time : 6 seconds
+Verified: withdraw_yield_rejects_non_positive_amount-Assertions
+withdraw_yield_rejects_non_positive_amount-Assertions: Properties successfully verified on all inputs
+Total time for set_reserve_rejects_negative_target: 8 seconds ; Split time: 0 seconds ; Number of problems: 1 ; Solver time : 7 seconds
+Verified: set_reserve_rejects_negative_target-Assertions
+set_reserve_rejects_negative_target-Assertions: Properties successfully verified on all inputs
+Ping 6m - 
+Total time for record_yield_settlement_rejects_negative_amounts: 59 seconds ; Split time: 0 seconds ; Number of problems: 3 ; Solver time : 50 seconds
+Verified: record_yield_settlement_rejects_negative_amounts-Assertions
+record_yield_settlement_rejects_negative_amounts-Assertions: Properties successfully verified on all inputs
+Ping 7m - 
+Total time for withdraw_principal_rejects_non_positive_amount: 96 seconds ; Split time: 0 seconds ; Number of problems: 3 ; Solver time : 88 seconds
+Verified: withdraw_principal_rejects_non_positive_amount-Assertions
+withdraw_principal_rejects_non_positive_amount-Assertions: Properties successfully verified on all inputs
+Ping 8m - 
+Attempted 10 splits, and proved a total weighing 25.0% for set_reserve_rejects_negative_audit_values
+Total time for set_reserve_rejects_negative_audit_values: 176 seconds ; Split time: 0 seconds ; Number of problems: 11 ; Solver time : 152 seconds
+Verified: set_reserve_rejects_negative_audit_values-Assertions
+set_reserve_rejects_negative_audit_values-Assertions: Properties successfully verified on all inputs
+Results for all:
+*---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*
+|Rule name                               |Verified     |Time (sec)|Description                                                 |Local vars                                        |
+|----------------------------------------|-------------|----------|------------------------------------------------------------|--------------------------------------------------|
+|Assertions                              |Not violated |0         |                                                            |no local variables                                |
+|                                        |(unsat)      |          |                                                            |                                                  |
+|sanity                                  |Not violated |2         |Assert message: Property satisfied                          |                                                  |
+|                                        |(sat)        |          |                                                            |                                                  |
+|Assertions                              |Not violated |6         |                                                            |no local variables                                |
+|                                        |(unsat)      |          |                                                            |                                                  |
+|Assertions                              |Not violated |11        |                                                            |no local variables                                |
+|                                        |(unsat)      |          |                                                            |                                                  |
+|Assertions                              |Not violated |17        |                                                            |no local variables                                |
+|                                        |(unsat)      |          |                                                            |                                                  |
+|Assertions                              |Not violated |27        |                                                            |no local variables                                |
+|                                        |(unsat)      |          |                                                            |                                                  |
+|Assertions                              |Not violated |90        |                                                            |no local variables                                |
+|                                        |(unsat)      |          |                                                            |                                                  |
+|Assertions                              |Not violated |115       |                                                            |no local variables                                |
+|                                        |(unsat)      |          |                                                            |                                                  |
+|Assertions                              |Not violated |200       |                                                            |no local variables                                |
+|                                        |(unsat)      |          |                                                            |                                                  |
+*---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*
+
+Duration 526815, null
+Done 8m
+Done 8m
+Event reporter: encountered errors while sending events

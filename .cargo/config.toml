@@ -1,0 +1,5 @@
+[env]
+GIT_CONFIG_GLOBAL = "/dev/null"
+
+[net]
+git-fetch-with-cli = true
