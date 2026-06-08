@@ -21,6 +21,13 @@ use stellar_macros::Upgradeable;
 
 const RATE_SCALE: i128 = 10_000_000;
 
+/// Approximate number of ledgers produced in one day (~5s close time).
+const DAY_IN_LEDGERS: u32 = 17_280;
+/// Target instance TTL set on every extension (~30 days).
+const INSTANCE_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+/// Re-extend the instance when its remaining TTL drops below this (~29 days).
+const INSTANCE_LIFETIME_THRESHOLD: u32 = INSTANCE_BUMP_AMOUNT - DAY_IN_LEDGERS;
+
 /// Storage keys used by the managed liquidity vault.
 #[contracttype]
 #[derive(Clone)]
@@ -62,6 +69,8 @@ pub enum ContractError {
     ExchangeRateMustBePositive = 16,
     ReserveBelowRequiredCollateral = 17,
     ArithmeticOverflow = 19,
+    PrincipalAndYieldTokenMustDiffer = 20,
+    ExchangeAndPartnerMustDiffer = 21,
 }
 
 /// Managed liquidity vault contract.
@@ -145,6 +154,13 @@ impl ManagedLiquidityVaultContract {
         exchange: Address,
         funding_partner: Address,
     ) {
+        if xlm_token == yield_token {
+            panic_with_error!(&env, ContractError::PrincipalAndYieldTokenMustDiffer);
+        }
+        if exchange == funding_partner {
+            panic_with_error!(&env, ContractError::ExchangeAndPartnerMustDiffer);
+        }
+
         let instance = env.storage().instance();
         instance.set(&DataKey::XlmToken, &xlm_token);
         instance.set(&DataKey::YieldToken, &yield_token);
@@ -166,6 +182,8 @@ impl ManagedLiquidityVaultContract {
             &DataKey::LastYieldSettlementReferenceHash,
             &Option::<BytesN<32>>::None,
         );
+
+        extend_contract_ttl(&env);
     }
 
     /// Deposits principal into the vault.
@@ -190,6 +208,7 @@ impl ManagedLiquidityVaultContract {
         }
         let funding_partner = get_address(&env, &DataKey::FundingPartner);
         funding_partner.require_auth();
+        extend_contract_ttl(&env);
 
         xlm_client(&env).transfer(
             &funding_partner,
@@ -239,6 +258,7 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::WithdrawAmountMustBePositive);
         }
         require_exchange_and_partner_auth(&env);
+        extend_contract_ttl(&env);
 
         let free_principal = get_i128(&env, &DataKey::FreePrincipalXlm);
         if amount_xlm > free_principal {
@@ -311,6 +331,7 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::AuditValuesMustBeNonNegative);
         }
         require_exchange_auth(&env);
+        extend_contract_ttl(&env);
 
         let partner_principal = get_i128(&env, &DataKey::PartnerPrincipalXlm);
         if target_reserved_xlm > partner_principal {
@@ -379,6 +400,7 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::YieldSettlementAmountsMustBeNonNegative);
         }
         require_exchange_auth(&env);
+        extend_contract_ttl(&env);
 
         let latest_epoch = get_u64(&env, &DataKey::LatestSettlementEpoch);
         if epoch_id <= latest_epoch {
@@ -443,6 +465,7 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::YieldAmountMustBePositive);
         }
         from.require_auth();
+        extend_contract_ttl(&env);
 
         yield_client(&env).transfer(&from, &env.current_contract_address(), &amount_usdt0);
 
@@ -490,6 +513,7 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::YieldAmountMustBePositive);
         }
         require_partner_auth(&env);
+        extend_contract_ttl(&env);
 
         let collected = get_i128(&env, &DataKey::CollectedYieldUsdt0);
         if amount_usdt0 > collected {
@@ -615,6 +639,19 @@ impl UpgradeableInternal for ManagedLiquidityVaultContract {
         exchange.require_auth();
         funding_partner.require_auth();
     }
+}
+
+/// Extends the TTL of the contract instance (and its instance storage) and the
+/// contract Wasm code so the vault stays invocable between (potentially
+/// infrequent) settlement calls.
+///
+/// `Instance::extend_ttl` bumps both the instance and code entries for the
+/// current contract in a single call, so upgrades are not needed to keep the
+/// Wasm code alive.
+fn extend_contract_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
 /// Returns the address stored at `key`.
