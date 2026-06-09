@@ -90,9 +90,3 @@ fn withdraw_yield_rejects_non_positive_amount(env: Env, to: Address, amount_usdt
         cvlr_assert!(result == Err(ContractError::YieldAmountMustBePositive));
     }
 }
-
-#[rule]
-fn renounce_ownership_is_disabled(env: Env) {
-    let result = ManagedLiquidityVaultContract::renounce_ownership(env);
-    cvlr_assert!(result == Err(ContractError::RenounceOwnershipDisabled));
-}

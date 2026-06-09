@@ -156,34 +156,10 @@
         }
       ]
     ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
-              "function_name": "set_reserve",
-              "args": [
-                {
-                  "i128": "20000000000"
-                },
-                {
-                  "i128": "1600000000"
-                },
-                {
-                  "i128": "1000000"
-                },
-                {
-                  "bytes": "0505050505050505050505050505050505050505050505050505050505050505"
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
+    [],
+    [],
+    [],
+    [],
     []
   ],
   "ledger": {
@@ -307,39 +283,6 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": "5541220902715666415"
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "ledger_key_nonce": {
-                "nonce": "8370022561469687789"
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": "8370022561469687789"
                   }
                 },
                 "durability": "temporary",
@@ -539,7 +482,7 @@
                           ]
                         },
                         "val": {
-                          "i128": "80000000000"
+                          "i128": "100000000000"
                         }
                       },
                       {
@@ -562,9 +505,7 @@
                             }
                           ]
                         },
-                        "val": {
-                          "bytes": "0505050505050505050505050505050505050505050505050505050505050505"
-                        }
+                        "val": "void"
                       },
                       {
                         "key": {
@@ -575,7 +516,7 @@
                           ]
                         },
                         "val": {
-                          "i128": "1600000000"
+                          "i128": "0"
                         }
                       },
                       {
@@ -587,7 +528,7 @@
                           ]
                         },
                         "val": {
-                          "i128": "1000000"
+                          "i128": "0"
                         }
                       },
                       {
@@ -633,7 +574,7 @@
                           ]
                         },
                         "val": {
-                          "i128": "20000000000"
+                          "i128": "0"
                         }
                       },
                       {
