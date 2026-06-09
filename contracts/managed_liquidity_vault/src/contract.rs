@@ -64,7 +64,6 @@ pub enum ContractError {
     YieldPaidExceedsDebtAndCurrentDue = 9,
     SettlementEpochMustIncrease = 10,
     AuditValuesMustBeNonNegative = 13,
-    RenounceOwnershipDisabled = 14,
     Unauthorized = 15,
     ExchangeRateMustBePositive = 16,
     ReserveBelowRequiredCollateral = 17,
@@ -218,12 +217,11 @@ impl ManagedLiquidityVaultContract {
 
         let partner_principal = get_i128(&env, &DataKey::PartnerPrincipalXlm);
         let free_principal = get_i128(&env, &DataKey::FreePrincipalXlm);
+        let new_partner_principal = checked_add(partner_principal, amount_xlm)?;
+        let new_free_principal = checked_add(free_principal, amount_xlm)?;
         let instance = env.storage().instance();
-        instance.set(
-            &DataKey::PartnerPrincipalXlm,
-            &(partner_principal + amount_xlm),
-        );
-        instance.set(&DataKey::FreePrincipalXlm, &(free_principal + amount_xlm));
+        instance.set(&DataKey::PartnerPrincipalXlm, &new_partner_principal);
+        instance.set(&DataKey::FreePrincipalXlm, &new_free_principal);
 
         env.events()
             .publish_event(&PartnerDepositEvt { amount: amount_xlm });
@@ -266,12 +264,11 @@ impl ManagedLiquidityVaultContract {
         }
 
         let partner_principal = get_i128(&env, &DataKey::PartnerPrincipalXlm);
+        let new_partner_principal = checked_sub(partner_principal, amount_xlm)?;
+        let new_free_principal = checked_sub(free_principal, amount_xlm)?;
         let instance = env.storage().instance();
-        instance.set(
-            &DataKey::PartnerPrincipalXlm,
-            &(partner_principal - amount_xlm),
-        );
-        instance.set(&DataKey::FreePrincipalXlm, &(free_principal - amount_xlm));
+        instance.set(&DataKey::PartnerPrincipalXlm, &new_partner_principal);
+        instance.set(&DataKey::FreePrincipalXlm, &new_free_principal);
 
         xlm_client(&env).transfer(&env.current_contract_address(), &to, &amount_xlm);
         env.events().publish_event(&PartnerPrincipalOutEvt {
@@ -344,12 +341,10 @@ impl ManagedLiquidityVaultContract {
             exchange_rate,
         )?;
 
+        let new_free_principal = checked_sub(partner_principal, target_reserved_xlm)?;
         let instance = env.storage().instance();
         instance.set(&DataKey::ReservedForExchangeXlm, &target_reserved_xlm);
-        instance.set(
-            &DataKey::FreePrincipalXlm,
-            &(partner_principal - target_reserved_xlm),
-        );
+        instance.set(&DataKey::FreePrincipalXlm, &new_free_principal);
         instance.set(&DataKey::LastSetReserveCredit, &reference_credit_usdt0);
         instance.set(&DataKey::LastSetReserveExchangeRate, &exchange_rate);
         instance.set(&DataKey::LastReserveReferenceHash, &reference_hash);
@@ -408,7 +403,7 @@ impl ManagedLiquidityVaultContract {
         }
 
         let current_debt = get_i128(&env, &DataKey::YieldDebtUsdt0);
-        let total_obligation = current_debt + yield_due_usdt0;
+        let total_obligation = checked_add(current_debt, yield_due_usdt0)?;
         if yield_paid_usdt0 > total_obligation {
             return Err(ContractError::YieldPaidExceedsDebtAndCurrentDue);
         }
@@ -422,15 +417,11 @@ impl ManagedLiquidityVaultContract {
         }
 
         let collected = get_i128(&env, &DataKey::CollectedYieldUsdt0);
+        let new_collected = checked_add(collected, yield_paid_usdt0)?;
+        let new_debt = checked_sub(total_obligation, yield_paid_usdt0)?;
         let instance = env.storage().instance();
-        instance.set(
-            &DataKey::CollectedYieldUsdt0,
-            &(collected + yield_paid_usdt0),
-        );
-        instance.set(
-            &DataKey::YieldDebtUsdt0,
-            &(total_obligation - yield_paid_usdt0),
-        );
+        instance.set(&DataKey::CollectedYieldUsdt0, &new_collected);
+        instance.set(&DataKey::YieldDebtUsdt0, &new_debt);
         instance.set(&DataKey::LatestSettlementEpoch, &epoch_id);
         instance.set(&DataKey::LastYieldSettlementReferenceHash, &reference_hash);
 
@@ -474,12 +465,13 @@ impl ManagedLiquidityVaultContract {
         let new_debt = if amount_usdt0 >= debt {
             0
         } else {
-            debt - amount_usdt0
+            checked_sub(debt, amount_usdt0)?
         };
+        let new_collected = checked_add(collected, amount_usdt0)?;
 
         let instance = env.storage().instance();
         instance.set(&DataKey::YieldDebtUsdt0, &new_debt);
-        instance.set(&DataKey::CollectedYieldUsdt0, &(collected + amount_usdt0));
+        instance.set(&DataKey::CollectedYieldUsdt0, &new_collected);
 
         env.events().publish_event(&YieldPaidEvt {
             amount: amount_usdt0,
@@ -520,9 +512,10 @@ impl ManagedLiquidityVaultContract {
             return Err(ContractError::InsufficientCollectedYield);
         }
 
+        let new_collected = checked_sub(collected, amount_usdt0)?;
         env.storage()
             .instance()
-            .set(&DataKey::CollectedYieldUsdt0, &(collected - amount_usdt0));
+            .set(&DataKey::CollectedYieldUsdt0, &new_collected);
         yield_client(&env).transfer(&env.current_contract_address(), &to, &amount_usdt0);
 
         env.events().publish_event(&PartnerYieldOutEvt {
@@ -530,15 +523,6 @@ impl ManagedLiquidityVaultContract {
             amount: amount_usdt0,
         });
         Ok(())
-    }
-
-    /// Rejects ownership renunciation.
-    ///
-    /// # Errors
-    ///
-    /// * [`ContractError::RenounceOwnershipDisabled`] - Always returned.
-    pub fn renounce_ownership(_env: Env) -> Result<(), ContractError> {
-        Err(ContractError::RenounceOwnershipDisabled)
     }
 
     /// Returns the exchange address.
@@ -711,6 +695,18 @@ fn ensure_reserve_covers_credit(
 /// Multiplies two `i128` values and converts overflow into a contract error.
 fn checked_mul(lhs: i128, rhs: i128) -> Result<i128, ContractError> {
     lhs.checked_mul(rhs)
+        .ok_or(ContractError::ArithmeticOverflow)
+}
+
+/// Adds two `i128` values and converts overflow into a contract error.
+fn checked_add(lhs: i128, rhs: i128) -> Result<i128, ContractError> {
+    lhs.checked_add(rhs)
+        .ok_or(ContractError::ArithmeticOverflow)
+}
+
+/// Subtracts two `i128` values and converts overflow into a contract error.
+fn checked_sub(lhs: i128, rhs: i128) -> Result<i128, ContractError> {
+    lhs.checked_sub(rhs)
         .ok_or(ContractError::ArithmeticOverflow)
 }
 

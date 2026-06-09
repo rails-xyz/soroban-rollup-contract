@@ -381,7 +381,7 @@ fn test_set_reserve_rejects_under_collateralized_target() {
 }
 
 #[test]
-fn test_validation_errors_and_renounce_ownership() {
+fn test_validation_errors() {
     let env = Env::default();
     let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
 
@@ -402,7 +402,6 @@ fn test_validation_errors_and_renounce_ownership() {
     assert_contract_error(|| client.pay_yield(&funding_partner, &0), 3);
     assert_contract_error(|| client.withdraw_partner_yield(&funding_partner, &0), 3);
     assert_contract_error(|| client.withdraw_partner_yield(&funding_partner, &1), 7);
-    assert_contract_error(|| client.renounce_ownership(), 14);
 }
 
 #[test]
