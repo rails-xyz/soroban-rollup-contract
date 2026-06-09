@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/managed_liquidity_vault.wasm", sha256 =
-    "1350567b033db97620c87f0ef3723e36a30f21c566c060b3191e767322afd390"
+    "80495a6c986b65fd9bcbc4f5206166dff25360ff2c503bc91ef0ce770033f444"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -41,7 +41,6 @@ pub trait Contract {
     fn funding_partner(env: soroban_sdk::Env) -> soroban_sdk::Address;
     fn yield_debt_usdt0(env: soroban_sdk::Env) -> i128;
     fn free_principal_xlm(env: soroban_sdk::Env) -> i128;
-    fn renounce_ownership(env: soroban_sdk::Env) -> Result<(), ContractError>;
     fn collected_yield_usdt0(env: soroban_sdk::Env) -> i128;
     fn partner_principal_xlm(env: soroban_sdk::Env) -> i128;
     fn withdraw_partner_yield(
@@ -121,11 +120,12 @@ pub enum ContractError {
     YieldPaidExceedsDebtAndCurrentDue = 9,
     SettlementEpochMustIncrease = 10,
     AuditValuesMustBeNonNegative = 13,
-    RenounceOwnershipDisabled = 14,
     Unauthorized = 15,
     ExchangeRateMustBePositive = 16,
     ReserveBelowRequiredCollateral = 17,
     ArithmeticOverflow = 19,
+    PrincipalAndYieldTokenMustDiffer = 20,
+    ExchangeAndPartnerMustDiffer = 21,
 }
 #[soroban_sdk::contracterror(export = false)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
