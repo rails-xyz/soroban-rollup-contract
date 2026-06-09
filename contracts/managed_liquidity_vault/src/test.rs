@@ -106,6 +106,48 @@ fn test_deployment() {
 }
 
 #[test]
+fn test_constructor_validation_errors() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let exchange = Address::generate(&env);
+    let funding_partner = Address::generate(&env);
+    let xlm_admin = Address::generate(&env);
+    let yield_admin = Address::generate(&env);
+    let (xlm_client, _) = create_token_contract(&env, &xlm_admin);
+    let (yield_client, _) = create_token_contract(&env, &yield_admin);
+
+    assert_contract_error(
+        || {
+            env.register(
+                ManagedLiquidityVaultContract,
+                (
+                    &xlm_client.address,
+                    &xlm_client.address,
+                    &exchange,
+                    &funding_partner,
+                ),
+            );
+        },
+        20,
+    );
+    assert_contract_error(
+        || {
+            env.register(
+                ManagedLiquidityVaultContract,
+                (
+                    &xlm_client.address,
+                    &yield_client.address,
+                    &exchange,
+                    &exchange,
+                ),
+            );
+        },
+        21,
+    );
+}
+
+#[test]
 fn test_deposit_and_set_reserve() {
     let env = Env::default();
     let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
@@ -428,6 +470,26 @@ fn test_set_reserve_validation_errors() {
 }
 
 #[test]
+fn test_set_reserve_rejects_arithmetic_overflow() {
+    let env = Env::default();
+    let (_exchange, funding_partner, xlm_client, _yield_client, client) = deploy_fixture(&env);
+
+    let deposit_amount = 10_000_0000000;
+    xlm_client.approve(
+        &funding_partner,
+        &client.address,
+        &deposit_amount,
+        &LEDGER_BUMP,
+    );
+    client.deposit_partner(&deposit_amount);
+
+    assert_contract_error(
+        || client.set_reserve(&deposit_amount, &1, &i128::MAX, &None),
+        19,
+    );
+}
+
+#[test]
 fn test_record_yield_settlement_validation_errors() {
     let env = Env::default();
     let (exchange, _funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
@@ -442,6 +504,16 @@ fn test_record_yield_settlement_validation_errors() {
         || client.record_yield_settlement(&2, &1_0000000, &1_0000001, &None),
         9,
     );
+}
+
+#[test]
+fn test_record_yield_settlement_rejects_debt_overflow() {
+    let env = Env::default();
+    let (_exchange, _funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);
+
+    client.record_yield_settlement(&1, &i128::MAX, &0, &None);
+
+    assert_contract_error(|| client.record_yield_settlement(&2, &1, &0, &None), 19);
 }
 
 #[test]
