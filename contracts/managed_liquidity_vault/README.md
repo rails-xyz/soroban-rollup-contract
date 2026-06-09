@@ -101,8 +101,8 @@ All contract state is stored in the contract instance storage (`Storage::instanc
     `epoch_id` must strictly increase in `record_yield_settlement`.
 4.  **Collateral Coverage constraint**:
     If `reference_credit_usdt0 > 0`, then:
-    $$\frac{\text{target\_reserved\_xlm} \times \text{exchange\_rate}}{\text{RATE\_SCALE}} \ge \text{reference\_credit\_usdt0}$$
-    *(Where $\text{RATE\_SCALE} = 10,000,000$)*
+    $$\frac{\text{target\\_reserved\\_xlm} \times \text{exchange\\_rate}}{\text{RATE\\_SCALE}} \ge \text{reference\\_credit\\_usdt0}$$
+    *(Where $\text{RATE\\_SCALE} = 10,000,000$)*
 
 ---
 
