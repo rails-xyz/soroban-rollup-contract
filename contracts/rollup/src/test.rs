@@ -346,3 +346,31 @@ fn test_upgrade_requires_operator_auth() {
     let new_wasm_hash = BytesN::from_array(&env, &[9; 32]);
     client.upgrade(&new_wasm_hash, &owner);
 }
+
+#[test]
+#[should_panic(expected = "Error(Contract, #31)")]
+fn test_withdraw_without_allowance() {
+    let env = Env::default();
+    let (_owner, other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+
+    // No rollup has posted an allowance for other_account, so withdraw should
+    // fail with ContractError::NoWithdrawalAllowance (31).
+    client.withdraw(&other_account);
+}
+
+#[test]
+fn test_collateral_balance() {
+    let env = Env::default();
+    let (_owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
+
+    // No collateral deposited yet.
+    assert_eq!(client.collateral_balance(), 0);
+
+    let deposit_amount = 10_0000000;
+    token_client.approve(&other_account, &client.address, &deposit_amount, &1000000);
+    client.deposit(&other_account, &deposit_amount);
+
+    // Reported balance tracks the contract's token balance.
+    assert_eq!(client.collateral_balance(), deposit_amount);
+    assert_eq!(client.collateral_balance(), token_client.balance(&client.address));
+}

@@ -18,6 +18,19 @@ use stellar_contract_utils::upgradeable::UpgradeableInternal;
 use stellar_access::ownable;
 use stellar_macros::{only_owner, Upgradeable};
 
+/// Approximate number of ledgers produced in one day (~5s close time).
+const DAY_IN_LEDGERS: u32 = 17_280;
+/// Target instance TTL set on every extension (~30 days).
+const INSTANCE_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+/// Re-extend the instance when its remaining TTL drops below this (~29 days).
+const INSTANCE_LIFETIME_THRESHOLD: u32 = INSTANCE_BUMP_AMOUNT - DAY_IN_LEDGERS;
+
+/// Target persistent-entry TTL set on every extension (~30 days).
+const PERSISTENT_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+/// Re-extend a persistent entry when its remaining TTL drops below this
+/// (~29 days).
+const PERSISTENT_LIFETIME_THRESHOLD: u32 = PERSISTENT_BUMP_AMOUNT - DAY_IN_LEDGERS;
+
 /// Storage keys used by the rollup contract.
 #[contracttype]
 #[derive(Clone)]
@@ -45,6 +58,8 @@ pub enum ContractError {
     ArrayLengthExceedsLimit = 15,
     WithdrawalSumMismatch = 16,
     InsufficientBalance = 17,
+    WithdrawalAmountMustBeNonNegative = 18,
+    FeesMustBeNonNegative = 19,
 
     // Withdrawal errors: 31-40
     NoWithdrawalAllowance = 31,
@@ -59,6 +74,9 @@ pub enum ContractError {
     // Ownership errors: 61-70
     RenounceOwnershipDisabled = 61,
     Unauthorized = 62,
+
+    // Arithmetic errors: 71-80
+    ArithmeticOverflow = 71,
 }
 
 /// Rollup contract.
@@ -128,6 +146,8 @@ impl RollupContract {
         env.storage()
             .instance()
             .set(&DataKey::TotalWithdrawable, &0i128);
+
+        extend_contract_ttl(&env);
     }
 
     /// Deposits collateral into the rollup.
@@ -150,6 +170,7 @@ impl RollupContract {
         if amount <= 0 {
             return Err(ContractError::DepositAmountMustBePositive);
         }
+        extend_contract_ttl(&env);
         let collateral_token: Address = env
             .storage()
             .instance()
@@ -191,6 +212,11 @@ impl RollupContract {
     ///   `new_withdrawal_sum` does not match the calculated total.
     /// * [`ContractError::InsufficientBalance`] - If the contract balance
     ///   cannot support the new withdrawable amount plus fees.
+    /// * [`ContractError::FeesMustBeNonNegative`] - If `new_fees < 0`.
+    /// * [`ContractError::WithdrawalAmountMustBeNonNegative`] - If any entry in
+    ///   `new_withdrawal_amounts` is negative.
+    /// * [`ContractError::ArithmeticOverflow`] - If any balance, fee, or
+    ///   allowance accumulation overflows.
     ///
     /// # Notes
     ///
@@ -206,6 +232,10 @@ impl RollupContract {
         new_withdrawal_sum: i128,
         new_fees: i128,
     ) -> Result<(), ContractError> {
+        extend_contract_ttl(&env);
+        if new_fees < 0 {
+            return Err(ContractError::FeesMustBeNonNegative);
+        }
         if new_block_hash == BytesN::from_array(&env, &[0; 32]) {
             return Err(ContractError::NewBlockHashEmpty);
         }
@@ -231,16 +261,26 @@ impl RollupContract {
         for i in 0..new_withdrawal_addresses.len() {
             let user = &new_withdrawal_addresses.get(i).unwrap();
             let allowance = new_withdrawal_amounts.get(i).unwrap();
+            if allowance < 0 {
+                return Err(ContractError::WithdrawalAmountMustBeNonNegative);
+            }
             let key = DataKey::WithdrawalAllowances(user.clone());
             let current = env.storage().persistent().get(&key).unwrap_or(0i128);
-            env.storage().persistent().set(&key, &(current + allowance));
-            calculated_withdrawal_sum += allowance;
+            env.storage()
+                .persistent()
+                .set(&key, &checked_add(current, allowance)?);
+            env.storage().persistent().extend_ttl(
+                &key,
+                PERSISTENT_LIFETIME_THRESHOLD,
+                PERSISTENT_BUMP_AMOUNT,
+            );
+            calculated_withdrawal_sum = checked_add(calculated_withdrawal_sum, allowance)?;
         }
         if calculated_withdrawal_sum != new_withdrawal_sum {
             return Err(ContractError::WithdrawalSumMismatch);
         }
 
-        let net_new_withdrawable = new_withdrawal_sum + new_fees;
+        let net_new_withdrawable = checked_add(new_withdrawal_sum, new_fees)?;
         let collateral_token: Address = env
             .storage()
             .instance()
@@ -253,23 +293,18 @@ impl RollupContract {
             .instance()
             .get(&DataKey::TotalWithdrawable)
             .unwrap();
-        if net_new_withdrawable > balance - total_withdrawable {
+        if net_new_withdrawable > checked_sub(balance, total_withdrawable)? {
             return Err(ContractError::InsufficientBalance);
         }
 
-        let current_total: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalWithdrawable)
-            .unwrap();
         env.storage().instance().set(
             &DataKey::TotalWithdrawable,
-            &(current_total + net_new_withdrawable),
+            &checked_add(total_withdrawable, net_new_withdrawable)?,
         );
         let current_fees: i128 = env.storage().instance().get(&DataKey::Fees).unwrap();
         env.storage()
             .instance()
-            .set(&DataKey::Fees, &(current_fees + new_fees));
+            .set(&DataKey::Fees, &checked_add(current_fees, new_fees)?);
         env.storage()
             .instance()
             .set(&DataKey::LatestBlockHash, &new_block_hash);
@@ -299,6 +334,7 @@ impl RollupContract {
     /// * This method withdraws the full stored allowance and resets it to zero.
     pub fn withdraw(env: Env, user: Address) -> Result<(), ContractError> {
         user.require_auth();
+        extend_contract_ttl(&env);
 
         let key = DataKey::WithdrawalAllowances(user.clone());
         let amount: i128 = env.storage().persistent().get(&key).unwrap_or(0);
@@ -307,14 +343,20 @@ impl RollupContract {
         }
 
         env.storage().persistent().set(&key, &0i128);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
         let current_total: i128 = env
             .storage()
             .instance()
             .get(&DataKey::TotalWithdrawable)
             .unwrap();
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalWithdrawable, &(current_total - amount));
+        env.storage().instance().set(
+            &DataKey::TotalWithdrawable,
+            &checked_sub(current_total, amount)?,
+        );
         let collateral_token: Address = env
             .storage()
             .instance()
@@ -345,6 +387,7 @@ impl RollupContract {
     /// * Collected fees are removed from both `Fees` and `TotalWithdrawable`.
     #[only_owner]
     pub fn collect_fees(env: Env, to: Address) -> Result<(), ContractError> {
+        extend_contract_ttl(&env);
         let fees: i128 = env.storage().instance().get(&DataKey::Fees).unwrap();
         if fees <= 0 {
             return Err(ContractError::NoFeesToCollect);
@@ -356,9 +399,10 @@ impl RollupContract {
             .instance()
             .get(&DataKey::TotalWithdrawable)
             .unwrap();
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalWithdrawable, &(current_total - fees));
+        env.storage().instance().set(
+            &DataKey::TotalWithdrawable,
+            &checked_sub(current_total, fees)?,
+        );
         let collateral_token: Address = env
             .storage()
             .instance()
@@ -407,6 +451,7 @@ impl RollupContract {
         if amount <= 0 {
             return Err(ContractError::RecoverAmountMustBePositive);
         }
+        extend_contract_ttl(&env);
         let token_client = soroban_sdk::token::TokenClient::new(&env, &token_address);
         token_client.transfer(&env.current_contract_address(), &to, &amount);
         Ok(())
@@ -505,4 +550,29 @@ impl UpgradeableInternal for RollupContract {
             panic_with_error!(e, ContractError::Unauthorized);
         }
     }
+}
+
+/// Extends the TTL of the contract instance (and its instance storage) and the
+/// contract Wasm code so the rollup stays invocable between (potentially
+/// infrequent) owner updates.
+///
+/// `Instance::extend_ttl` bumps both the instance and code entries for the
+/// current contract in a single call, so upgrades are not needed to keep the
+/// Wasm code alive.
+fn extend_contract_ttl(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+}
+
+/// Adds two `i128` values and converts overflow into a contract error.
+fn checked_add(lhs: i128, rhs: i128) -> Result<i128, ContractError> {
+    lhs.checked_add(rhs)
+        .ok_or(ContractError::ArithmeticOverflow)
+}
+
+/// Subtracts two `i128` values and converts overflow into a contract error.
+fn checked_sub(lhs: i128, rhs: i128) -> Result<i128, ContractError> {
+    lhs.checked_sub(rhs)
+        .ok_or(ContractError::ArithmeticOverflow)
 }
