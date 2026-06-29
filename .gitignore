@@ -7,3 +7,8 @@ target
 
 # Certora local run artifacts
 .certora_internal/
+
+# Codegraph
+.codegraph/
+.treehouse/
+.venv

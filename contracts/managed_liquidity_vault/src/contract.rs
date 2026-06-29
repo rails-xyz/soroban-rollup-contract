@@ -6,8 +6,7 @@
 //!   internal credit and market making,
 //! - yield is paid in a separate `USDT0`-like token by an approved payer and
 //!   can only be withdrawn by the `FundingPartner`,
-//! - and upgrades require both the `Exchange` and `FundingPartner` to
-//!   authorize them.
+//! - and upgrades require only the `Exchange` to authorize them.
 //!
 //! The reserve model is intentionally simple. The contract only checks that the
 //! posted reserve covers the stated credit using a fixed-point exchange rate.
@@ -143,8 +142,7 @@ impl ManagedLiquidityVaultContract {
     ///
     /// # Notes
     ///
-    /// * Upgrades require both the configured `Exchange` and
-    ///   `FundingPartner`.
+    /// * Upgrades require only the configured `Exchange`.
     /// * Principal and yield balances are initialized to zero.
     pub fn __constructor(
         env: Env,
@@ -616,12 +614,9 @@ impl UpgradeableInternal for ManagedLiquidityVaultContract {
     fn _require_auth(e: &Env, operator: &Address) {
         operator.require_auth();
         let exchange = get_address(e, &DataKey::Exchange);
-        let funding_partner = get_address(e, &DataKey::FundingPartner);
-        if *operator != exchange && *operator != funding_partner {
+        if *operator != exchange {
             panic_with_error!(e, ContractError::Unauthorized);
         }
-        exchange.require_auth();
-        funding_partner.require_auth();
     }
 }
 

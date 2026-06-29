@@ -542,14 +542,20 @@ fn test_zero_credit_reserve_and_yield_balance() {
 }
 
 #[test]
-fn test_upgrade_requires_exchange_and_funding_partner_auth() {
+fn test_upgrade_requires_exchange_auth() {
     let env = Env::default();
     let (exchange, funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);
 
     let wasm_hash = BytesN::from_array(&env, &[8; 32]);
     let outsider = Address::generate(&env);
 
+    // An outsider cannot upgrade.
     assert_contract_error(|| client.upgrade(&wasm_hash, &outsider), 15);
+    // The funding partner alone can no longer upgrade; only the exchange may.
+    assert_contract_error(|| client.upgrade(&wasm_hash, &funding_partner), 15);
+    // With the exchange authorized, auth passes and the upgrade proceeds far
+    // enough to panic on the non-existent Wasm hash, proving exchange-only auth
+    // is sufficient.
     assert_panics(|| {
         client
             .mock_auths(&[MockAuth {
@@ -561,54 +567,6 @@ fn test_upgrade_requires_exchange_and_funding_partner_auth() {
                     sub_invokes: &[],
                 },
             }])
-            .upgrade(&wasm_hash, &exchange)
-    });
-    assert_panics(|| {
-        client
-            .mock_auths(&[
-                MockAuth {
-                    address: &exchange,
-                    invoke: &MockAuthInvoke {
-                        contract: &client.address,
-                        fn_name: "upgrade",
-                        args: (&wasm_hash, &exchange).into_val(&env),
-                        sub_invokes: &[],
-                    },
-                },
-                MockAuth {
-                    address: &funding_partner,
-                    invoke: &MockAuthInvoke {
-                        contract: &client.address,
-                        fn_name: "upgrade",
-                        args: (&wasm_hash, &exchange).into_val(&env),
-                        sub_invokes: &[],
-                    },
-                },
-            ])
-            .upgrade(&wasm_hash, &outsider)
-    });
-    assert_panics(|| {
-        client
-            .mock_auths(&[
-                MockAuth {
-                    address: &exchange,
-                    invoke: &MockAuthInvoke {
-                        contract: &client.address,
-                        fn_name: "upgrade",
-                        args: (&wasm_hash, &exchange).into_val(&env),
-                        sub_invokes: &[],
-                    },
-                },
-                MockAuth {
-                    address: &funding_partner,
-                    invoke: &MockAuthInvoke {
-                        contract: &client.address,
-                        fn_name: "upgrade",
-                        args: (&wasm_hash, &exchange).into_val(&env),
-                        sub_invokes: &[],
-                    },
-                },
-            ])
             .upgrade(&wasm_hash, &exchange)
     });
 }
