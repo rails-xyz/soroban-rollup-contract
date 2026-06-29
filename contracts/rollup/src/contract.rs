@@ -342,12 +342,10 @@ impl RollupContract {
             return Err(ContractError::NoWithdrawalAllowance);
         }
 
-        env.storage().persistent().set(&key, &0i128);
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_LIFETIME_THRESHOLD,
-            PERSISTENT_BUMP_AMOUNT,
-        );
+        // The full allowance is withdrawn, so the entry is now zero. Remove it
+        // rather than keeping a zero-valued entry alive on rent; a future read
+        // falls back to `unwrap_or(0)`.
+        env.storage().persistent().remove(&key);
         let current_total: i128 = env
             .storage()
             .instance()
