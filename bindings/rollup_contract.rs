@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
-    file = "./target/wasm32v1-none/release/rollup_contract.wasm",
-    sha256 = "529457c9640292eb0386510a1b3cef4cfc50289f3a40a383fcf914d5cb542099"
+    file = "./target/wasm32v1-none/release/rollup_contract.wasm", sha256 =
+    "7095bf181fb938b01fd7fcfbf390165b38cc93d10dc99d5a35a2ec43d988feb7"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -32,8 +32,14 @@ pub trait Contract {
         new_wasm_hash: soroban_sdk::BytesN<32>,
         operator: soroban_sdk::Address,
     );
-    fn withdraw(env: soroban_sdk::Env, user: soroban_sdk::Address) -> Result<(), ContractError>;
-    fn collect_fees(env: soroban_sdk::Env, to: soroban_sdk::Address) -> Result<(), ContractError>;
+    fn withdraw(
+        env: soroban_sdk::Env,
+        user: soroban_sdk::Address,
+    ) -> Result<(), ContractError>;
+    fn collect_fees(
+        env: soroban_sdk::Env,
+        to: soroban_sdk::Address,
+    ) -> Result<(), ContractError>;
     fn __constructor(
         env: soroban_sdk::Env,
         collateral_token: soroban_sdk::Address,
@@ -110,11 +116,15 @@ pub enum ContractError {
     ArrayLengthExceedsLimit = 15,
     WithdrawalSumMismatch = 16,
     InsufficientBalance = 17,
+    WithdrawalAmountMustBeNonNegative = 18,
+    FeesMustBeNonNegative = 19,
     NoWithdrawalAllowance = 31,
     NoFeesToCollect = 41,
     CannotRecoverCollateral = 51,
     RecoverAmountMustBePositive = 52,
     RenounceOwnershipDisabled = 61,
+    Unauthorized = 62,
+    ArithmeticOverflow = 71,
 }
 #[soroban_sdk::contracterror(export = false)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -175,32 +185,32 @@ pub enum PausableError {
     EnforcedPause = 1000,
     ExpectedPause = 1001,
 }
-#[soroban_sdk::contractevent(topics = ["deposit_event"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["deposit_event"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct DepositEvent {
     pub user: soroban_sdk::Address,
     pub amount: i128,
 }
-#[soroban_sdk::contractevent(topics = ["new_block_event"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["new_block_event"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct NewBlockEvent {
     pub new_block_hash: soroban_sdk::BytesN<32>,
     pub new_withdrawal_sum: i128,
     pub new_fees: i128,
 }
-#[soroban_sdk::contractevent(topics = ["withdrawal_event"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["withdrawal_event"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct WithdrawalEvent {
     pub user: soroban_sdk::Address,
     pub amount: i128,
 }
-#[soroban_sdk::contractevent(topics = ["fees_collected_event"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["fees_collected_event"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FeesCollectedEvent {
     pub to: soroban_sdk::Address,
     pub amount: i128,
 }
-#[soroban_sdk::contractevent(topics = ["role_granted"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["role_granted"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RoleGranted {
     #[topic]
@@ -209,7 +219,7 @@ pub struct RoleGranted {
     pub account: soroban_sdk::Address,
     pub caller: soroban_sdk::Address,
 }
-#[soroban_sdk::contractevent(topics = ["role_revoked"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["role_revoked"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RoleRevoked {
     #[topic]
@@ -218,13 +228,13 @@ pub struct RoleRevoked {
     pub account: soroban_sdk::Address,
     pub caller: soroban_sdk::Address,
 }
-#[soroban_sdk::contractevent(topics = ["admin_renounced"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["admin_renounced"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct AdminRenounced {
     #[topic]
     pub admin: soroban_sdk::Address,
 }
-#[soroban_sdk::contractevent(topics = ["role_admin_changed"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["role_admin_changed"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct RoleAdminChanged {
     #[topic]
@@ -232,14 +242,14 @@ pub struct RoleAdminChanged {
     pub previous_admin_role: soroban_sdk::Symbol,
     pub new_admin_role: soroban_sdk::Symbol,
 }
-#[soroban_sdk::contractevent(topics = ["admin_transfer_completed"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["admin_transfer_completed"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct AdminTransferCompleted {
     #[topic]
     pub new_admin: soroban_sdk::Address,
     pub previous_admin: soroban_sdk::Address,
 }
-#[soroban_sdk::contractevent(topics = ["admin_transfer_initiated"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["admin_transfer_initiated"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct AdminTransferInitiated {
     #[topic]
@@ -247,36 +257,37 @@ pub struct AdminTransferInitiated {
     pub new_admin: soroban_sdk::Address,
     pub live_until_ledger: u32,
 }
-#[soroban_sdk::contractevent(topics = ["ownership_transfer"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["ownership_transfer"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OwnershipTransfer {
     pub old_owner: soroban_sdk::Address,
     pub new_owner: soroban_sdk::Address,
     pub live_until_ledger: u32,
 }
-#[soroban_sdk::contractevent(topics = ["ownership_renounced"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["ownership_renounced"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OwnershipRenounced {
     pub old_owner: soroban_sdk::Address,
 }
-#[soroban_sdk::contractevent(topics = ["ownership_transfer_completed"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["ownership_transfer_completed"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OwnershipTransferCompleted {
     pub new_owner: soroban_sdk::Address,
 }
-#[soroban_sdk::contractevent(topics = ["set_root"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["set_root"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetRoot {
     pub root: soroban_sdk::Bytes,
 }
-#[soroban_sdk::contractevent(topics = ["set_claimed"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["set_claimed"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct SetClaimed {
     pub index: soroban_sdk::Val,
 }
-#[soroban_sdk::contractevent(topics = ["paused"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["paused"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Paused {}
-#[soroban_sdk::contractevent(topics = ["unpaused"], export = false)]
+#[soroban_sdk::contractevent(export = false, topics = ["unpaused"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Unpaused {}
+
