@@ -58,3 +58,21 @@ settlement epoch; that stays an off-chain settlement decision.
 Operational note: the `Exchange` must record a settlement epoch
 before it pays that epoch. A payment before the record is booked as
 excess, and it does not decrease the debt that the record adds later.
+
+## RAILS-4 — "Allow unilateral withdraw of excess XLM funds"
+
+**Severity:** Informational. **Status:** Acknowledged.
+
+We keep the dual signature on `withdraw_partner_principal`:
+
+- `set_reserve` is a periodic posting of off-chain credit, not a live
+  measurement. Exposure can change between postings. The co-signature
+  lets the `Exchange` post a new reserve before principal leaves the
+  vault.
+- Outstanding `YieldDebtUsdt0` has no collateral, so the wind-down of
+  the position stays a joint action.
+- Joint approval gives each party non-repudiable evidence of consent
+  (`Repudiate.2` in the STRIDE model).
+
+The accepted cost is the shared liveness dependency tracked as
+`DoS.1` / `DoS.2` in the STRIDE model.
