@@ -126,6 +126,37 @@ principal withdrawal is blocked. This is tracked as `DoS.1` / `DoS.2` in the
 STRIDE model and is handled through resilient custody and signing procedures on
 both sides.
 
+### The Yield Obligation Is Defined Off-Chain
+
+The vault records yield **settlements**, not the yield **agreement**. The rate,
+day-count convention, compounding, fee offsets, and any renegotiation live in
+the partnership contract off-chain; `record_yield_settlement` books the result
+of applying them to an epoch.
+
+Deriving the obligation on-chain instead — accruing from elapsed ledger time
+against the reserved collateral — would require the vault to hold the rate
+schedule and every amendment to it, and to define accrual behaviour across
+reserve changes mid-epoch. That turns the vault from a settlement ledger into
+the authoritative source of the commercial agreement, which is a different
+product, and it would still need an authenticated exchange submission for every
+term change. The trust assumption would move rather than disappear.
+
+The controls that exist instead are reconciliation controls:
+
+- Every settlement is authenticated, epoch-monotonic, and emitted as
+  `YieldSettlementEvt`, so the full obligation history is reconstructible from
+  events even though instance storage only holds current-state figures.
+- `LastYieldSettlementReferenceHash` binds each epoch to a retained off-chain
+  settlement package, so a submitted `yield_due_usdt0` can be checked against
+  the signed calculation that produced it.
+- `CollectedYieldUsdt0` only rises against a real token transfer, and
+  `TotalExcessYieldPaidUsdt0` captures payments beyond the recorded debt.
+
+The funding partner is expected to reconcile the event stream against the
+reference packages. Publishing the obligation parameters on-chain remains a
+candidate for a future revision if the commercial terms stabilize into a form
+that can be expressed as fixed on-chain parameters.
+
 ### Constructor Validation
 
 The role and token addresses are immutable after deployment, so the constructor
