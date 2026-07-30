@@ -45,6 +45,7 @@ pub enum DataKey {
     LastSetReserveCredit,
     LastReserveReferenceHash,
     LastYieldSettlementReferenceHash,
+    TotalExcessYieldPaidUsdt0,
 }
 
 /// Errors returned by the managed liquidity vault.
@@ -69,6 +70,10 @@ pub enum ContractError {
     ArithmeticOverflow = 19,
     PrincipalAndYieldTokenMustDiffer = 20,
     ExchangeAndPartnerMustDiffer = 21,
+    RecoverAmountMustBePositive = 22,
+    InsufficientUnaccountedBalance = 23,
+    RoleAddressMustNotBeToken = 24,
+    TokenDecimalsMustMatch = 25,
 }
 
 /// Managed liquidity vault contract.
@@ -116,12 +121,24 @@ pub struct YieldSettlementEvt {
 #[derive(Clone)]
 pub struct YieldPaidEvt {
     pub amount: i128,
+    /// Portion of `amount` that exceeded the outstanding yield debt.
+    pub excess: i128,
 }
 
 /// Event emitted when the funding partner withdraws collected yield.
 #[contractevent]
 #[derive(Clone)]
 pub struct PartnerYieldOutEvt {
+    pub to: Address,
+    pub amount: i128,
+}
+
+/// Event emitted when tokens that the vault ledger does not account for are
+/// recovered from the vault.
+#[contractevent]
+#[derive(Clone)]
+pub struct UnaccountedTokensRecoveredEvt {
+    pub token: Address,
     pub to: Address,
     pub amount: i128,
 }
@@ -140,10 +157,25 @@ impl ManagedLiquidityVaultContract {
     /// * `funding_partner` - Address authorized to deposit principal and
     ///   withdraw collected yield.
     ///
+    /// # Errors
+    ///
+    /// * [`ContractError::PrincipalAndYieldTokenMustDiffer`] - If both token
+    ///   addresses are the same.
+    /// * [`ContractError::ExchangeAndPartnerMustDiffer`] - If both role
+    ///   addresses are the same.
+    /// * [`ContractError::RoleAddressMustNotBeToken`] - If a role address is
+    ///   one of the configured token contracts.
+    /// * [`ContractError::TokenDecimalsMustMatch`] - If the two token contracts
+    ///   report different decimal precisions.
+    ///
     /// # Notes
     ///
     /// * Upgrades require only the configured `Exchange`.
     /// * Principal and yield balances are initialized to zero.
+    /// * Both token addresses are probed through the SEP-41 `decimals`
+    ///   entrypoint. Deployment fails if an address is not a live contract
+    ///   that exposes `decimals`. The probe does not prove the full token
+    ///   interface.
     pub fn __constructor(
         env: Env,
         xlm_token: Address,
@@ -156,6 +188,29 @@ impl ManagedLiquidityVaultContract {
         }
         if exchange == funding_partner {
             panic_with_error!(&env, ContractError::ExchangeAndPartnerMustDiffer);
+        }
+        if exchange == xlm_token
+            || exchange == yield_token
+            || funding_partner == xlm_token
+            || funding_partner == yield_token
+        {
+            panic_with_error!(&env, ContractError::RoleAddressMustNotBeToken);
+        }
+
+        // Probing `decimals` proves both addresses are live contracts that
+        // expose the `decimals` entrypoint. The probe does not prove the full
+        // SEP-41 interface; that stays a pre-deployment review item, and a
+        // wrong token is corrected with a new deployment.
+        let xlm_decimals = soroban_sdk::token::TokenClient::new(&env, &xlm_token).decimals();
+        let yield_decimals = soroban_sdk::token::TokenClient::new(&env, &yield_token).decimals();
+
+        // `ensure_reserve_covers_credit` compares a principal amount scaled by
+        // `exchange_rate` against a yield amount and cancels only `RATE_SCALE`,
+        // so the coverage check is sound only while both tokens share the same
+        // precision. Pin that assumption at deployment instead of relying on
+        // an off-chain pre-deployment check.
+        if xlm_decimals != yield_decimals {
+            panic_with_error!(&env, ContractError::TokenDecimalsMustMatch);
         }
 
         let instance = env.storage().instance();
@@ -179,6 +234,7 @@ impl ManagedLiquidityVaultContract {
             &DataKey::LastYieldSettlementReferenceHash,
             &Option::<BytesN<32>>::None,
         );
+        instance.set(&DataKey::TotalExcessYieldPaidUsdt0, &0i128);
 
         extend_contract_ttl(&env);
     }
@@ -449,6 +505,11 @@ impl ManagedLiquidityVaultContract {
     /// * Authorization from `from` is required at the root invocation.
     /// * This method can only improve the funding partner position by reducing
     ///   debt and/or increasing collected yield.
+    /// * A payment larger than the outstanding debt clears the debt and the
+    ///   surplus is added to `TotalExcessYieldPaidUsdt0` and reported in
+    ///   [`YieldPaidEvt::excess`]. The surplus is accounting metadata only: the
+    ///   full amount is still credited to collected yield and it does not
+    ///   offset the due amount of a later settlement epoch.
     pub fn pay_yield(env: Env, from: Address, amount_usdt0: i128) -> Result<(), ContractError> {
         if amount_usdt0 <= 0 {
             return Err(ContractError::YieldAmountMustBePositive);
@@ -460,19 +521,23 @@ impl ManagedLiquidityVaultContract {
 
         let debt = get_i128(&env, &DataKey::YieldDebtUsdt0);
         let collected = get_i128(&env, &DataKey::CollectedYieldUsdt0);
-        let new_debt = if amount_usdt0 >= debt {
-            0
+        let (new_debt, excess) = if amount_usdt0 >= debt {
+            (0, checked_sub(amount_usdt0, debt)?)
         } else {
-            checked_sub(debt, amount_usdt0)?
+            (checked_sub(debt, amount_usdt0)?, 0)
         };
         let new_collected = checked_add(collected, amount_usdt0)?;
+        let cumulative_excess = get_i128_or_default(&env, &DataKey::TotalExcessYieldPaidUsdt0);
+        let new_cumulative_excess = checked_add(cumulative_excess, excess)?;
 
         let instance = env.storage().instance();
         instance.set(&DataKey::YieldDebtUsdt0, &new_debt);
         instance.set(&DataKey::CollectedYieldUsdt0, &new_collected);
+        instance.set(&DataKey::TotalExcessYieldPaidUsdt0, &new_cumulative_excess);
 
         env.events().publish_event(&YieldPaidEvt {
             amount: amount_usdt0,
+            excess,
         });
         Ok(())
     }
@@ -523,6 +588,73 @@ impl ManagedLiquidityVaultContract {
         Ok(())
     }
 
+    /// Recovers tokens that the vault ledger does not account for.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `token` - Token contract to recover balance from.
+    /// * `to` - Recipient of the recovered tokens.
+    /// * `amount` - Amount to recover.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::RecoverAmountMustBePositive`] - If `amount <= 0`.
+    /// * [`ContractError::InsufficientUnaccountedBalance`] - If `amount`
+    ///   exceeds the unaccounted balance reported by
+    ///   [`Self::unaccounted_balance`].
+    /// * [`ContractError::ArithmeticOverflow`] - If the unaccounted balance
+    ///   computation overflows.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `Exchange` is required.
+    /// * For the configured principal and yield tokens, only the surplus over
+    ///   the tracked ledger balance can leave through this method, so partner
+    ///   principal and collected yield stay withdrawable through their normal
+    ///   flows. Any other token can be recovered in full.
+    /// * Recovery is a manual, off-chain-reconciled operation: the `Exchange`
+    ///   is responsible for returning recovered funds to their rightful owner.
+    pub fn recover_unaccounted_tokens(
+        env: Env,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        if amount <= 0 {
+            return Err(ContractError::RecoverAmountMustBePositive);
+        }
+        require_exchange_auth(&env);
+        extend_contract_ttl(&env);
+
+        let unaccounted = unaccounted_balance_of(&env, &token)?;
+        if amount > unaccounted {
+            return Err(ContractError::InsufficientUnaccountedBalance);
+        }
+
+        soroban_sdk::token::TokenClient::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &to,
+            &amount,
+        );
+
+        env.events()
+            .publish_event(&UnaccountedTokensRecoveredEvt { token, to, amount });
+        Ok(())
+    }
+
+    /// Returns the balance of `token` that the vault ledger does not account
+    /// for and that is therefore recoverable through
+    /// [`Self::recover_unaccounted_tokens`].
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::ArithmeticOverflow`] - If the surplus computation
+    ///   overflows.
+    pub fn unaccounted_balance(env: Env, token: Address) -> Result<i128, ContractError> {
+        unaccounted_balance_of(&env, &token)
+    }
+
     /// Returns the exchange address.
     pub fn exchange(env: Env) -> Address {
         get_address(&env, &DataKey::Exchange)
@@ -566,6 +698,15 @@ impl ManagedLiquidityVaultContract {
     /// Returns yield owed by the exchange but not yet paid.
     pub fn yield_debt_usdt0(env: Env) -> i128 {
         get_i128(&env, &DataKey::YieldDebtUsdt0)
+    }
+
+    /// Returns the running total of yield paid through
+    /// [`Self::pay_yield`] beyond the debt outstanding at the time of payment.
+    ///
+    /// This is accounting metadata for off-chain reconciliation. It never
+    /// offsets a later settlement obligation.
+    pub fn total_excess_yield_paid_usdt0(env: Env) -> i128 {
+        get_i128_or_default(&env, &DataKey::TotalExcessYieldPaidUsdt0)
     }
 
     /// Returns the latest recorded yield settlement epoch.
@@ -643,6 +784,11 @@ fn get_i128(env: &Env, key: &DataKey) -> i128 {
     env.storage().instance().get(key).unwrap()
 }
 
+/// Returns the `i128` value stored at `key`, or `0` when the key is absent.
+fn get_i128_or_default(env: &Env, key: &DataKey) -> i128 {
+    env.storage().instance().get(key).unwrap_or(0)
+}
+
 /// Returns the `u64` value stored at `key`.
 fn get_u64(env: &Env, key: &DataKey) -> u64 {
     env.storage().instance().get(key).unwrap()
@@ -685,6 +831,31 @@ fn ensure_reserve_covers_credit(
         return Err(ContractError::ReserveBelowRequiredCollateral);
     }
     Ok(())
+}
+
+/// Returns the balance of `token` held by the vault that is not backed by a
+/// vault ledger entry.
+///
+/// The principal token is backed by `PartnerPrincipalXlm` (the sum of free and
+/// reserved principal) and the yield token by `CollectedYieldUsdt0`. Any other
+/// token has no ledger backing, so its whole balance is unaccounted for.
+///
+/// The result is floored at zero so a token balance that is (unexpectedly)
+/// below the tracked ledger amount never reports a recoverable surplus.
+fn unaccounted_balance_of(env: &Env, token: &Address) -> Result<i128, ContractError> {
+    let balance =
+        soroban_sdk::token::TokenClient::new(env, token).balance(&env.current_contract_address());
+
+    let tracked = if *token == get_address(env, &DataKey::XlmToken) {
+        get_i128(env, &DataKey::PartnerPrincipalXlm)
+    } else if *token == get_address(env, &DataKey::YieldToken) {
+        get_i128(env, &DataKey::CollectedYieldUsdt0)
+    } else {
+        0
+    };
+
+    let surplus = checked_sub(balance, tracked)?;
+    Ok(surplus.max(0))
 }
 
 /// Multiplies two `i128` values and converts overflow into a contract error.

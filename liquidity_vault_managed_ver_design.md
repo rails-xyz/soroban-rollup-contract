@@ -27,14 +27,24 @@ Because of that, the exchange can adjust how much of the vault is reserved as co
 
 Dual-signing is reserved for partner-principal withdrawal. This is modeled directly in Soroban by requiring both addresses to authorize the partner-principal withdrawal method.
 
-Upgrade authority is intentionally separate from these business operations.
+The `Exchange` alone holds the upgrade authority.
 
-- `Owner` should be a dedicated governance address, not the `Exchange` or the `FundingPartner`
-- `Owner` should only be used for contract upgrade
-- `Owner` should be treated as immutable from the vault contract's point of view
-- ownership rotation should not be exposed through the vault contract API
+An earlier revision of this design used a dedicated `Owner` governance
+address for upgrades, separate from the two business parties. The
+implementation dropped this separation. The contract overrides
+`UpgradeableInternal::_require_auth` to accept only the configured
+`Exchange`. The vault has no `Owner` role.
 
-In practice, the recommended setup is for `Owner` to be a separate governance multisig address controlled jointly off-chain by the exchange and funding partner.
+- the `Exchange` can upgrade the contract unilaterally
+- the `FundingPartner` does not co-sign upgrades
+- the upgrade authority is the immutable `Exchange` address set at construction
+- role rotation is not exposed through the vault contract API
+
+This gives the `Exchange` much power, because an upgrade can change
+each authorization and accounting rule. We accept the residual risk.
+The business partnership contract and the upgrade review procedures
+bound the risk off-chain, not on-chain dual control. See `Spoof.3` /
+`Elevation.1` in the STRIDE threat model.
 
 ### Collateral Maintenance
 
@@ -80,6 +90,7 @@ flowchart LR
     Partner(("Funding Partner"))
     Vault["Liquidity Vault Contract"]
     Exchange(("Exchange / Sole MM"))
+    Payer(("Any Approved Payer"))
     Ops["Off-chain Exchange Trading"]
     Approval["Dual Approval (Exchange + FundingPartner)"]
 
@@ -89,19 +100,20 @@ flowchart LR
     Partner -->|"deposit_partner(XLM)"| Vault
     Exchange -->|"set_reserve(...)"| Vault
     Exchange -.->|"internal USDT0 credit and market making"| Ops
-    Exchange -->|"record_yield_settlement(...) pay_yield(USDT0)"| Vault
+    Exchange -->|"record_yield_settlement(...)"| Vault
     Vault -->|"withdraw_partner_yield(USDT0)"| Partner
     Partner -->|"co-sign withdraw_partner_principal(...)"| Approval
     Exchange -->|"co-sign withdraw_partner_principal(...)"| Approval
     Approval -->|"withdraw_partner_principal(XLM)"| Vault
     Vault -->|"transfer partner principal (XLM)"| Partner
+    Payer -->|"pay_yield(from, USDT0)"| Vault
 
     classDef party fill:#e8f1ff,stroke:#3366cc,color:#102a43;
     classDef vault fill:#eef7ee,stroke:#2f855a,color:#173d2d;
     classDef offchain fill:#f7f7f7,stroke:#666,color:#333;
     classDef approval fill:#fff4e5,stroke:#dd6b20,color:#7b341e;
 
-    class Partner,Exchange party;
+    class Partner,Exchange,Payer party;
     class Vault vault;
     class Ops offchain;
     class Approval approval;
@@ -133,7 +145,6 @@ Because there is only one depositor and one MM, the state can be collapsed to gl
 
 #### Global State
 
-- `Owner`
 - `Exchange`
 - `FundingPartner`
 - `XlmToken`
@@ -143,6 +154,7 @@ Because there is only one depositor and one MM, the state can be collapsed to gl
 - `ReservedForExchangeXlm`
 - `CollectedYieldUsdt0`
 - `YieldDebtUsdt0`
+- `TotalExcessYieldPaidUsdt0`
 - `LatestSettlementEpoch`
 
 #### Optional Audit State
@@ -156,10 +168,10 @@ These are not strictly required, but they help with off-chain reconciliation and
 
 #### State Interpretation
 
-- `Owner`
-  - immutable governance owner used only for contract upgrade
-  - not used for normal vault operations
-  - should be a separate governance address rather than either business party directly
+- `Exchange`
+  - immutable operator address set at construction
+  - manages collateral reserves and settlement accounting
+  - is also the sole upgrade authority
 
 - `PartnerPrincipalXlm`
   - total `XLM` principal contributed by the funding partner and still tracked as partner-owned principal inside the vault.
@@ -176,6 +188,9 @@ These are not strictly required, but they help with off-chain reconciliation and
 - `YieldDebtUsdt0`
   - `USDT0` yield owed by the exchange but not yet paid into the vault.
 
+- `TotalExcessYieldPaidUsdt0`
+  - running total of `USDT0` paid above the debt outstanding at the time of payment. Accounting metadata only; it does not offset later settlement obligations.
+
 ### Core Invariants
 
 - `FreePrincipalXlm + ReservedForExchangeXlm = PartnerPrincipalXlm`
@@ -190,8 +205,11 @@ These are not strictly required, but they help with off-chain reconciliation and
 For this design, the simplest governance pattern is:
 
 - partner-only calls for pure funding actions,
-- exchange-only calls for collateral management and settlement accounting,
-- and dual-sign calls for partner principal withdrawal.
+- exchange-only calls for collateral management, settlement accounting, recovery
+  of unaccounted tokens, and contract upgrade,
+- dual-sign calls for partner principal withdrawal,
+- and one permissionless call, `pay_yield`, which can only pay value into the
+  vault.
 
 #### Partner-Only
 
@@ -202,19 +220,35 @@ For this design, the simplest governance pattern is:
 
 - `set_reserve(target_reserved_xlm, reference_credit_usdt0, exchange_rate, reference_hash)`
 - `record_yield_settlement(...)`
-- `pay_yield(amount_usdt0)`
+- `recover_unaccounted_tokens(token, to, amount)`
+- `upgrade(new_wasm_hash, operator)`
 
 #### Dual-Sign
 
 - `withdraw_partner_principal(to, amount_xlm)`
 
+#### Any Self-Authorizing Payer
+
+- `pay_yield(from, amount_usdt0)`
+
+`pay_yield` is intentionally permissionless. It requires only
+`from.require_auth()`. The payer does not have to be the `Exchange`;
+alternate fee or treasury wallets can pay yield directly. This is safe
+because the method can only move value into the vault. It decreases
+`YieldDebtUsdt0` (with a floor of zero) and increases
+`CollectedYieldUsdt0`. Both changes can only improve the position of
+the funding partner. Integrators must not use the payer identity as an
+authorization signal.
+
 ### Proposed Methods
 
 #### Initialization
 
-##### \_\_constructor(xlm_token, yield_token, exchange, funding_partner, owner)
+##### \_\_constructor(xlm_token, yield_token, exchange, funding_partner)
 
-Initializes the contract with the two business parties and the separate upgrade-only governance owner.
+Initializes the contract with the two token contracts and the two
+business parties. There is no separate governance owner. The
+`Exchange` is also the upgrade authority.
 
 #### Funding Methods
 
@@ -292,6 +326,7 @@ Any approved payer.
 - Transfers `USDT0` into the vault.
 - Reduces `YieldDebtUsdt0` by up to the paid amount.
 - Increases `CollectedYieldUsdt0`.
+- Records the part of the payment above the outstanding debt in `TotalExcessYieldPaidUsdt0` and in the `excess` field of the emitted event.
 
 This is safe because it can only improve partner position by reducing debt and/or
 increasing collected yield.
@@ -302,6 +337,16 @@ increasing collected yield.
 
 - Transfers collected `USDT0` yield from the vault to the funding partner.
 - Decreases `CollectedYieldUsdt0`.
+
+#### Recovery Methods
+
+##### recover_unaccounted_tokens(token, to, amount)
+
+`Exchange`\-only.
+
+- Transfers token balances that the internal ledger does not track.
+- For the configured principal and yield tokens, only the surplus above `PartnerPrincipalXlm` or `CollectedYieldUsdt0` is recoverable.
+- The view `unaccounted_balance(token)` reports the recoverable amount.
 
 ## Example `DataKey`
 
@@ -321,10 +366,11 @@ pub enum DataKey {
     LastSetReserveCredit,
     LastReserveReferenceHash,
     LastYieldSettlementReferenceHash,
+    TotalExcessYieldPaidUsdt0,
 }
 ```
 
-`Owner` is still part of the overall design, but in the current contract it is managed through the ownership helper rather than this local `DataKey` enum.
+There is no `Owner` key. The `Exchange` address authorizes upgrades.
 
 ## Example Events
 
@@ -334,6 +380,7 @@ pub enum DataKey {
 - `YieldSettlementRecorded`
 - `YieldPaid`
 - `PartnerYieldWithdrawn`
+- `UnaccountedTokensRecovered`
 
 ## Concrete Examples
 

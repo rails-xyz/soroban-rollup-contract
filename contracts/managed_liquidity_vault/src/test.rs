@@ -1,6 +1,7 @@
 extern crate std;
 
 use soroban_sdk::{
+    contract, contractimpl, symbol_short,
     testutils::Address as _,
     testutils::{MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
@@ -10,6 +11,27 @@ use soroban_sdk::{
 use super::contract::{ManagedLiquidityVaultContract, ManagedLiquidityVaultContractClient};
 
 const LEDGER_BUMP: u32 = 1_000_000;
+
+/// Minimal token stub used to exercise constructor validation against a token
+/// contract whose precision differs from the Stellar 7-decimal standard.
+#[contract]
+pub struct DecimalsOnlyToken;
+
+#[contractimpl]
+impl DecimalsOnlyToken {
+    pub fn __constructor(env: Env, decimals: u32) {
+        env.storage()
+            .instance()
+            .set(&symbol_short!("decimals"), &decimals);
+    }
+
+    pub fn decimals(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("decimals"))
+            .unwrap()
+    }
+}
 
 fn create_token_contract<'a>(
     env: &Env,
@@ -145,6 +167,103 @@ fn test_constructor_validation_errors() {
         },
         21,
     );
+
+    // A role address must not be one of the configured token contracts.
+    assert_contract_error(
+        || {
+            env.register(
+                ManagedLiquidityVaultContract,
+                (
+                    &xlm_client.address,
+                    &yield_client.address,
+                    &yield_client.address,
+                    &funding_partner,
+                ),
+            );
+        },
+        24,
+    );
+    assert_contract_error(
+        || {
+            env.register(
+                ManagedLiquidityVaultContract,
+                (
+                    &xlm_client.address,
+                    &yield_client.address,
+                    &exchange,
+                    &xlm_client.address,
+                ),
+            );
+        },
+        24,
+    );
+
+    // Tokens with mismatched precision break the collateral coverage check, so
+    // deployment must fail rather than defer the check to off-chain review.
+    let six_decimals_token = env.register(DecimalsOnlyToken, (6u32,));
+    assert_contract_error(
+        || {
+            env.register(
+                ManagedLiquidityVaultContract,
+                (
+                    &xlm_client.address,
+                    &six_decimals_token,
+                    &exchange,
+                    &funding_partner,
+                ),
+            );
+        },
+        25,
+    );
+
+    // A matching-precision token contract is accepted.
+    let seven_decimals_token = env.register(DecimalsOnlyToken, (7u32,));
+    env.register(
+        ManagedLiquidityVaultContract,
+        (
+            &xlm_client.address,
+            &seven_decimals_token,
+            &exchange,
+            &funding_partner,
+        ),
+    );
+}
+
+#[test]
+fn test_constructor_rejects_non_token_addresses() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let exchange = Address::generate(&env);
+    let funding_partner = Address::generate(&env);
+    let xlm_admin = Address::generate(&env);
+    let (xlm_client, _) = create_token_contract(&env, &xlm_admin);
+    let not_a_token = Address::generate(&env);
+
+    // Addresses that are not live token contracts abort deployment instead of
+    // producing a vault that can never move funds.
+    assert_panics(|| {
+        env.register(
+            ManagedLiquidityVaultContract,
+            (
+                &not_a_token,
+                &xlm_client.address,
+                &exchange,
+                &funding_partner,
+            ),
+        );
+    });
+    assert_panics(|| {
+        env.register(
+            ManagedLiquidityVaultContract,
+            (
+                &xlm_client.address,
+                &not_a_token,
+                &exchange,
+                &funding_partner,
+            ),
+        );
+    });
 }
 
 #[test]
@@ -539,6 +658,194 @@ fn test_zero_credit_reserve_and_yield_balance() {
     assert_eq!(client.free_principal_xlm(), 0);
     assert_eq!(client.reserved_for_exchange_xlm(), deposit_amount);
     assert_eq!(client.yield_balance(), settlement_paid);
+}
+
+#[test]
+fn test_pay_yield_records_excess_over_outstanding_debt() {
+    let env = Env::default();
+    let (exchange, _funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
+
+    let settlement_due = 10_0000000;
+    let settlement_paid = 4_0000000;
+    let outstanding_debt = settlement_due - settlement_paid;
+    let partial_payment = 2_0000000;
+    let overpayment = outstanding_debt - partial_payment + 5_0000000;
+
+    yield_client.approve(&exchange, &client.address, &settlement_paid, &LEDGER_BUMP);
+    client.record_yield_settlement(&1u64, &settlement_due, &settlement_paid, &None);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), 0);
+
+    // A payment within the outstanding debt records no excess.
+    yield_client.approve(&exchange, &client.address, &partial_payment, &LEDGER_BUMP);
+    client.pay_yield(&exchange, &partial_payment);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), 0);
+    assert_eq!(
+        client.yield_debt_usdt0(),
+        outstanding_debt - partial_payment
+    );
+
+    // A payment beyond the outstanding debt clears the debt and records the
+    // surplus, while the full amount still lands in collected yield.
+    yield_client.approve(&exchange, &client.address, &overpayment, &LEDGER_BUMP);
+    client.pay_yield(&exchange, &overpayment);
+
+    assert_eq!(client.yield_debt_usdt0(), 0);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), 5_0000000);
+    assert_eq!(
+        client.collected_yield_usdt0(),
+        settlement_paid + partial_payment + overpayment
+    );
+
+    // Excess accumulates across payments; a payment made with zero debt is
+    // excess in full.
+    let debt_free_payment = 1_0000000;
+    yield_client.approve(&exchange, &client.address, &debt_free_payment, &LEDGER_BUMP);
+    client.pay_yield(&exchange, &debt_free_payment);
+    assert_eq!(
+        client.total_excess_yield_paid_usdt0(),
+        5_0000000 + debt_free_payment
+    );
+}
+
+#[test]
+fn test_recorded_excess_does_not_offset_later_settlement_due() {
+    let env = Env::default();
+    let (exchange, _funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
+
+    let overpayment = 6_0000000;
+    let next_epoch_due = 4_0000000;
+
+    // Pay yield with no debt outstanding: the whole payment is excess.
+    yield_client.approve(&exchange, &client.address, &overpayment, &LEDGER_BUMP);
+    client.pay_yield(&exchange, &overpayment);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), overpayment);
+
+    // The recorded excess is reconciliation metadata only: the next epoch's
+    // obligation is booked in full and the excess counter is unchanged.
+    client.record_yield_settlement(&1u64, &next_epoch_due, &0, &None);
+
+    assert_eq!(client.yield_debt_usdt0(), next_epoch_due);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), overpayment);
+    assert_eq!(client.collected_yield_usdt0(), overpayment);
+}
+
+#[test]
+fn test_recover_third_party_token_in_full() {
+    let env = Env::default();
+    let (_exchange, _funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);
+
+    let stray_admin = Address::generate(&env);
+    let (stray_client, stray_admin_client) = create_token_contract(&env, &stray_admin);
+    let recipient = Address::generate(&env);
+    let stray_amount = 55_0000000;
+
+    // A third party mis-sends a token the vault does not know about.
+    stray_admin_client.mint(&client.address, &stray_amount);
+    assert_eq!(
+        client.unaccounted_balance(&stray_client.address),
+        stray_amount
+    );
+
+    client.recover_unaccounted_tokens(&stray_client.address, &recipient, &stray_amount);
+
+    assert_eq!(stray_client.balance(&recipient), stray_amount);
+    assert_eq!(client.unaccounted_balance(&stray_client.address), 0);
+}
+
+#[test]
+fn test_recover_surplus_of_configured_tokens_only() {
+    let env = Env::default();
+    let (exchange, funding_partner, xlm_client, yield_client, client) = deploy_fixture(&env);
+
+    let deposit_amount = 10_000_0000000;
+    let settlement_paid = 4_0000000;
+    let stray_xlm = 7_0000000;
+    let stray_yield = 3_0000000;
+    let recipient = Address::generate(&env);
+
+    xlm_client.approve(
+        &funding_partner,
+        &client.address,
+        &deposit_amount,
+        &LEDGER_BUMP,
+    );
+    client.deposit_partner(&deposit_amount);
+    yield_client.approve(&exchange, &client.address, &settlement_paid, &LEDGER_BUMP);
+    client.record_yield_settlement(&1u64, &settlement_paid, &settlement_paid, &None);
+
+    // Tracked balances are never unaccounted for.
+    assert_eq!(client.unaccounted_balance(&xlm_client.address), 0);
+    assert_eq!(client.unaccounted_balance(&yield_client.address), 0);
+
+    // Direct transfers that bypass deposit_partner / pay_yield are recoverable.
+    xlm_client.transfer(&funding_partner, &client.address, &stray_xlm);
+    yield_client.transfer(&exchange, &client.address, &stray_yield);
+    assert_eq!(client.unaccounted_balance(&xlm_client.address), stray_xlm);
+    assert_eq!(
+        client.unaccounted_balance(&yield_client.address),
+        stray_yield
+    );
+
+    // Recovering beyond the surplus is rejected, so tracked principal and yield
+    // stay withdrawable through their normal flows.
+    assert_contract_error(
+        || client.recover_unaccounted_tokens(&xlm_client.address, &recipient, &(stray_xlm + 1)),
+        23,
+    );
+    assert_contract_error(
+        || client.recover_unaccounted_tokens(&yield_client.address, &recipient, &(stray_yield + 1)),
+        23,
+    );
+
+    client.recover_unaccounted_tokens(&xlm_client.address, &recipient, &stray_xlm);
+    client.recover_unaccounted_tokens(&yield_client.address, &recipient, &stray_yield);
+
+    assert_eq!(xlm_client.balance(&recipient), stray_xlm);
+    assert_eq!(yield_client.balance(&recipient), stray_yield);
+    assert_eq!(client.partner_principal_xlm(), deposit_amount);
+    assert_eq!(client.collected_yield_usdt0(), settlement_paid);
+    assert_eq!(client.xlm_balance(), deposit_amount);
+    assert_eq!(client.yield_balance(), settlement_paid);
+}
+
+#[test]
+fn test_recover_validation_and_authorization() {
+    let env = Env::default();
+    let (exchange, funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);
+
+    let stray_admin = Address::generate(&env);
+    let (stray_client, stray_admin_client) = create_token_contract(&env, &stray_admin);
+    let recipient = Address::generate(&env);
+    let stray_amount = 9_0000000;
+    stray_admin_client.mint(&client.address, &stray_amount);
+
+    assert_contract_error(
+        || client.recover_unaccounted_tokens(&stray_client.address, &recipient, &0),
+        22,
+    );
+
+    // Recovery is authorized by the exchange alone.
+    let _ = env.auths();
+    client.recover_unaccounted_tokens(&stray_client.address, &recipient, &stray_amount);
+    let addresses: std::vec::Vec<_> = env.auths().into_iter().map(|(addr, _)| addr).collect();
+    assert!(addresses.contains(&exchange));
+    assert!(!addresses.contains(&funding_partner));
+
+    // The funding partner cannot authorize recovery on its own.
+    stray_admin_client.mint(&client.address, &stray_amount);
+    assert_panics(|| {
+        client
+            .mock_auths(&[MockAuth {
+                address: &funding_partner,
+                invoke: &MockAuthInvoke {
+                    contract: &client.address,
+                    fn_name: "recover_unaccounted_tokens",
+                    args: (&stray_client.address, &recipient, &stray_amount).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .recover_unaccounted_tokens(&stray_client.address, &recipient, &stray_amount)
+    });
 }
 
 #[test]

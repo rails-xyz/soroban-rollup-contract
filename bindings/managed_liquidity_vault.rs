@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/managed_liquidity_vault.wasm", sha256 =
-    "9c89a1c372ae7745928fe933c13757829665b0a69c3eba47d6cd97c0d6e79de2"
+    "5f5e6e0cc9b5312bf82887b1b51bb5d67f22392f39850018815d5016b3f3de6f"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -41,6 +41,10 @@ pub trait Contract {
     fn funding_partner(env: soroban_sdk::Env) -> soroban_sdk::Address;
     fn yield_debt_usdt0(env: soroban_sdk::Env) -> i128;
     fn free_principal_xlm(env: soroban_sdk::Env) -> i128;
+    fn unaccounted_balance(
+        env: soroban_sdk::Env,
+        token: soroban_sdk::Address,
+    ) -> Result<i128, ContractError>;
     fn collected_yield_usdt0(env: soroban_sdk::Env) -> i128;
     fn partner_principal_xlm(env: soroban_sdk::Env) -> i128;
     fn withdraw_partner_yield(
@@ -61,6 +65,12 @@ pub trait Contract {
         env: soroban_sdk::Env,
     ) -> Option<soroban_sdk::BytesN<32>>;
     fn reserved_for_exchange_xlm(env: soroban_sdk::Env) -> i128;
+    fn recover_unaccounted_tokens(
+        env: soroban_sdk::Env,
+        token: soroban_sdk::Address,
+        to: soroban_sdk::Address,
+        amount: i128,
+    ) -> Result<(), ContractError>;
     fn withdraw_partner_principal(
         env: soroban_sdk::Env,
         to: soroban_sdk::Address,
@@ -69,6 +79,7 @@ pub trait Contract {
     fn last_reserve_reference_hash(
         env: soroban_sdk::Env,
     ) -> Option<soroban_sdk::BytesN<32>>;
+    fn total_excess_yield_paid_usdt0(env: soroban_sdk::Env) -> i128;
     fn last_set_reserve_exchange_rate(env: soroban_sdk::Env) -> i128;
 }
 #[soroban_sdk::contracttype(export = false)]
@@ -88,6 +99,7 @@ pub enum DataKey {
     LastSetReserveCredit,
     LastReserveReferenceHash,
     LastYieldSettlementReferenceHash,
+    TotalExcessYieldPaidUsdt0,
 }
 #[soroban_sdk::contracttype(export = false)]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -126,6 +138,10 @@ pub enum ContractError {
     ArithmeticOverflow = 19,
     PrincipalAndYieldTokenMustDiffer = 20,
     ExchangeAndPartnerMustDiffer = 21,
+    RecoverAmountMustBePositive = 22,
+    InsufficientUnaccountedBalance = 23,
+    RoleAddressMustNotBeToken = 24,
+    TokenDecimalsMustMatch = 25,
 }
 #[soroban_sdk::contracterror(export = false)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -163,6 +179,7 @@ pub enum PausableError {
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct YieldPaidEvt {
     pub amount: i128,
+    pub excess: i128,
 }
 #[soroban_sdk::contractevent(export = false, topics = ["reserve_set_evt"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -194,6 +211,17 @@ pub struct YieldSettlementEvt {
 #[soroban_sdk::contractevent(export = false, topics = ["partner_principal_out_evt"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct PartnerPrincipalOutEvt {
+    pub to: soroban_sdk::Address,
+    pub amount: i128,
+}
+#[soroban_sdk::contractevent(
+    export = false,
+    topics = ["unaccounted_tokens_recovered_evt",
+    ]
+)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct UnaccountedTokensRecoveredEvt {
+    pub token: soroban_sdk::Address,
     pub to: soroban_sdk::Address,
     pub amount: i128,
 }
