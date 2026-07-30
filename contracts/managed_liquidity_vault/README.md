@@ -140,6 +140,8 @@ All contract state is stored in the contract instance storage (`Storage::instanc
 - `ReservedForExchangeXlm`: Portion of principal locked as exchange collateral.
 - `CollectedYieldUsdt0`: Yield tokens paid in and available for withdrawal.
 - `YieldDebtUsdt0`: Yield obligation recorded but not yet paid.
+- `TotalExcessYieldPaidUsdt0`: Running total of yield paid beyond the debt that was
+  outstanding at the time of payment (accounting metadata only).
 - `LatestSettlementEpoch`: ID of the most recently settled epoch.
 - `LastSetReserveExchangeRate` / `LastSetReserveCredit`: Last audited exchange rate and off-chain credit level.
 - `LastReserveReferenceHash` / `LastYieldSettlementReferenceHash`: Optional 32-byte hash link to off-chain audit packages.
@@ -150,9 +152,19 @@ All contract state is stored in the contract instance storage (`Storage::instanc
     $$\text{FreePrincipalXlm} + \text{ReservedForExchangeXlm} = \text{PartnerPrincipalXlm}$$
 2.  **Yield Collection Backing**:
     `CollectedYieldUsdt0` only increases when `USDT0` is successfully transferred into the contract. Unpaid obligations remain in `YieldDebtUsdt0`.
-3.  **Monotonic Epochs**:
+3.  **Excess Payment Traceability**:
+    A `pay_yield` payment larger than the outstanding `YieldDebtUsdt0` clears the
+    debt, credits the full amount to `CollectedYieldUsdt0`, and records the
+    surplus in both `TotalExcessYieldPaidUsdt0` and the `excess` field of
+    `YieldPaidEvt`. The surplus is reconciliation metadata: it is **not** netted
+    against the due amount of a later settlement epoch, so
+    `record_yield_settlement` still books each epoch's obligation in full.
+    Off-chain settlement remains the place where an overpayment is applied to a
+    future period, and `total_excess_yield_paid_usdt0()` exposes the running total for
+    that reconciliation.
+4.  **Monotonic Epochs**:
     `epoch_id` must strictly increase in `record_yield_settlement`.
-4.  **Collateral Coverage constraint**:
+5.  **Collateral Coverage constraint**:
     If `reference_credit_usdt0 > 0`, then:
     $$\frac{\text{target\\_reserved\\_xlm} \times \text{exchange\\_rate}}{\text{RATE\\_SCALE}} \ge \text{reference\\_credit\\_usdt0}$$
     Where $\text{RATE\\_SCALE} = 10,000,000$
