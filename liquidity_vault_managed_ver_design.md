@@ -154,6 +154,7 @@ Because there is only one depositor and one MM, the state can be collapsed to gl
 - `ReservedForExchangeXlm`
 - `CollectedYieldUsdt0`
 - `YieldDebtUsdt0`
+- `TotalExcessYieldPaidUsdt0`
 - `LatestSettlementEpoch`
 
 #### Optional Audit State
@@ -186,6 +187,9 @@ These are not strictly required, but they help with off-chain reconciliation and
 
 - `YieldDebtUsdt0`
   - `USDT0` yield owed by the exchange but not yet paid into the vault.
+
+- `TotalExcessYieldPaidUsdt0`
+  - running total of `USDT0` paid above the debt outstanding at the time of payment. Accounting metadata only; it does not offset later settlement obligations.
 
 ### Core Invariants
 
@@ -322,6 +326,7 @@ Any approved payer.
 - Transfers `USDT0` into the vault.
 - Reduces `YieldDebtUsdt0` by up to the paid amount.
 - Increases `CollectedYieldUsdt0`.
+- Records the part of the payment above the outstanding debt in `TotalExcessYieldPaidUsdt0` and in the `excess` field of the emitted event.
 
 This is safe because it can only improve partner position by reducing debt and/or
 increasing collected yield.
@@ -332,6 +337,16 @@ increasing collected yield.
 
 - Transfers collected `USDT0` yield from the vault to the funding partner.
 - Decreases `CollectedYieldUsdt0`.
+
+#### Recovery Methods
+
+##### recover_unaccounted_tokens(token, to, amount)
+
+`Exchange`\-only.
+
+- Transfers token balances that the internal ledger does not track.
+- For the configured principal and yield tokens, only the surplus above `PartnerPrincipalXlm` or `CollectedYieldUsdt0` is recoverable.
+- The view `unaccounted_balance(token)` reports the recoverable amount.
 
 ## Example `DataKey`
 
@@ -351,6 +366,7 @@ pub enum DataKey {
     LastSetReserveCredit,
     LastReserveReferenceHash,
     LastYieldSettlementReferenceHash,
+    TotalExcessYieldPaidUsdt0,
 }
 ```
 
@@ -364,6 +380,7 @@ There is no `Owner` key. The `Exchange` address authorizes upgrades.
 - `YieldSettlementRecorded`
 - `YieldPaid`
 - `PartnerYieldWithdrawn`
+- `UnaccountedTokensRecovered`
 
 ## Concrete Examples
 
