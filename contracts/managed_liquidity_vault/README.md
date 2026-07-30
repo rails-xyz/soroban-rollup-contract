@@ -94,6 +94,7 @@ All contract state is stored in the contract instance storage (`Storage::instanc
 - `ReservedForExchangeXlm`: Portion of principal locked as exchange collateral.
 - `CollectedYieldUsdt0`: Yield tokens paid in and available for withdrawal.
 - `YieldDebtUsdt0`: Yield obligation recorded but not yet paid.
+- `TotalExcessYieldPaidUsdt0`: Running total of yield paid above the outstanding debt (accounting metadata only).
 - `LatestSettlementEpoch`: ID of the most recently settled epoch.
 - `LastSetReserveExchangeRate` / `LastSetReserveCredit`: Last audited exchange rate and off-chain credit level.
 - `LastReserveReferenceHash` / `LastYieldSettlementReferenceHash`: Optional 32-byte hash link to off-chain audit packages.
@@ -104,9 +105,11 @@ All contract state is stored in the contract instance storage (`Storage::instanc
     $$\text{FreePrincipalXlm} + \text{ReservedForExchangeXlm} = \text{PartnerPrincipalXlm}$$
 2.  **Yield Collection Backing**:
     `CollectedYieldUsdt0` only increases when `USDT0` is successfully transferred into the contract. Unpaid obligations remain in `YieldDebtUsdt0`.
-3.  **Monotonic Epochs**:
+3.  **Excess Payment Traceability**:
+    A `pay_yield` payment above the outstanding `YieldDebtUsdt0` clears the debt and credits the full amount to `CollectedYieldUsdt0`. The surplus is recorded in `TotalExcessYieldPaidUsdt0` and in the `excess` field of `YieldPaidEvt`. The surplus does not offset the due amount of a later settlement epoch.
+4.  **Monotonic Epochs**:
     `epoch_id` must strictly increase in `record_yield_settlement`.
-4.  **Collateral Coverage constraint**:
+5.  **Collateral Coverage constraint**:
     If `reference_credit_usdt0 > 0`, then:
     $$\frac{\text{target\\_reserved\\_xlm} \times \text{exchange\\_rate}}{\text{RATE\\_SCALE}} \ge \text{reference\\_credit\\_usdt0}$$
     Where $\text{RATE\\_SCALE} = 10,000,000$

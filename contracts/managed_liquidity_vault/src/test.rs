@@ -661,6 +661,75 @@ fn test_zero_credit_reserve_and_yield_balance() {
 }
 
 #[test]
+fn test_pay_yield_records_excess_over_outstanding_debt() {
+    let env = Env::default();
+    let (exchange, _funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
+
+    let settlement_due = 10_0000000;
+    let settlement_paid = 4_0000000;
+    let outstanding_debt = settlement_due - settlement_paid;
+    let partial_payment = 2_0000000;
+    let overpayment = outstanding_debt - partial_payment + 5_0000000;
+
+    yield_client.approve(&exchange, &client.address, &settlement_paid, &LEDGER_BUMP);
+    client.record_yield_settlement(&1u64, &settlement_due, &settlement_paid, &None);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), 0);
+
+    // A payment within the outstanding debt records no excess.
+    yield_client.approve(&exchange, &client.address, &partial_payment, &LEDGER_BUMP);
+    client.pay_yield(&exchange, &partial_payment);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), 0);
+    assert_eq!(
+        client.yield_debt_usdt0(),
+        outstanding_debt - partial_payment
+    );
+
+    // A payment beyond the outstanding debt clears the debt and records the
+    // surplus, while the full amount still lands in collected yield.
+    yield_client.approve(&exchange, &client.address, &overpayment, &LEDGER_BUMP);
+    client.pay_yield(&exchange, &overpayment);
+
+    assert_eq!(client.yield_debt_usdt0(), 0);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), 5_0000000);
+    assert_eq!(
+        client.collected_yield_usdt0(),
+        settlement_paid + partial_payment + overpayment
+    );
+
+    // Excess accumulates across payments; a payment made with zero debt is
+    // excess in full.
+    let debt_free_payment = 1_0000000;
+    yield_client.approve(&exchange, &client.address, &debt_free_payment, &LEDGER_BUMP);
+    client.pay_yield(&exchange, &debt_free_payment);
+    assert_eq!(
+        client.total_excess_yield_paid_usdt0(),
+        5_0000000 + debt_free_payment
+    );
+}
+
+#[test]
+fn test_recorded_excess_does_not_offset_later_settlement_due() {
+    let env = Env::default();
+    let (exchange, _funding_partner, _xlm_client, yield_client, client) = deploy_fixture(&env);
+
+    let overpayment = 6_0000000;
+    let next_epoch_due = 4_0000000;
+
+    // Pay yield with no debt outstanding: the whole payment is excess.
+    yield_client.approve(&exchange, &client.address, &overpayment, &LEDGER_BUMP);
+    client.pay_yield(&exchange, &overpayment);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), overpayment);
+
+    // The recorded excess is reconciliation metadata only: the next epoch's
+    // obligation is booked in full and the excess counter is unchanged.
+    client.record_yield_settlement(&1u64, &next_epoch_due, &0, &None);
+
+    assert_eq!(client.yield_debt_usdt0(), next_epoch_due);
+    assert_eq!(client.total_excess_yield_paid_usdt0(), overpayment);
+    assert_eq!(client.collected_yield_usdt0(), overpayment);
+}
+
+#[test]
 fn test_recover_third_party_token_in_full() {
     let env = Env::default();
     let (_exchange, _funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);

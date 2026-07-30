@@ -45,6 +45,7 @@ pub enum DataKey {
     LastSetReserveCredit,
     LastReserveReferenceHash,
     LastYieldSettlementReferenceHash,
+    TotalExcessYieldPaidUsdt0,
 }
 
 /// Errors returned by the managed liquidity vault.
@@ -120,6 +121,8 @@ pub struct YieldSettlementEvt {
 #[derive(Clone)]
 pub struct YieldPaidEvt {
     pub amount: i128,
+    /// Portion of `amount` that exceeded the outstanding yield debt.
+    pub excess: i128,
 }
 
 /// Event emitted when the funding partner withdraws collected yield.
@@ -231,6 +234,7 @@ impl ManagedLiquidityVaultContract {
             &DataKey::LastYieldSettlementReferenceHash,
             &Option::<BytesN<32>>::None,
         );
+        instance.set(&DataKey::TotalExcessYieldPaidUsdt0, &0i128);
 
         extend_contract_ttl(&env);
     }
@@ -501,6 +505,11 @@ impl ManagedLiquidityVaultContract {
     /// * Authorization from `from` is required at the root invocation.
     /// * This method can only improve the funding partner position by reducing
     ///   debt and/or increasing collected yield.
+    /// * A payment larger than the outstanding debt clears the debt and the
+    ///   surplus is added to `TotalExcessYieldPaidUsdt0` and reported in
+    ///   [`YieldPaidEvt::excess`]. The surplus is accounting metadata only: the
+    ///   full amount is still credited to collected yield and it does not
+    ///   offset the due amount of a later settlement epoch.
     pub fn pay_yield(env: Env, from: Address, amount_usdt0: i128) -> Result<(), ContractError> {
         if amount_usdt0 <= 0 {
             return Err(ContractError::YieldAmountMustBePositive);
@@ -512,19 +521,23 @@ impl ManagedLiquidityVaultContract {
 
         let debt = get_i128(&env, &DataKey::YieldDebtUsdt0);
         let collected = get_i128(&env, &DataKey::CollectedYieldUsdt0);
-        let new_debt = if amount_usdt0 >= debt {
-            0
+        let (new_debt, excess) = if amount_usdt0 >= debt {
+            (0, checked_sub(amount_usdt0, debt)?)
         } else {
-            checked_sub(debt, amount_usdt0)?
+            (checked_sub(debt, amount_usdt0)?, 0)
         };
         let new_collected = checked_add(collected, amount_usdt0)?;
+        let cumulative_excess = get_i128_or_default(&env, &DataKey::TotalExcessYieldPaidUsdt0);
+        let new_cumulative_excess = checked_add(cumulative_excess, excess)?;
 
         let instance = env.storage().instance();
         instance.set(&DataKey::YieldDebtUsdt0, &new_debt);
         instance.set(&DataKey::CollectedYieldUsdt0, &new_collected);
+        instance.set(&DataKey::TotalExcessYieldPaidUsdt0, &new_cumulative_excess);
 
         env.events().publish_event(&YieldPaidEvt {
             amount: amount_usdt0,
+            excess,
         });
         Ok(())
     }
@@ -687,6 +700,15 @@ impl ManagedLiquidityVaultContract {
         get_i128(&env, &DataKey::YieldDebtUsdt0)
     }
 
+    /// Returns the running total of yield paid through
+    /// [`Self::pay_yield`] beyond the debt outstanding at the time of payment.
+    ///
+    /// This is accounting metadata for off-chain reconciliation. It never
+    /// offsets a later settlement obligation.
+    pub fn total_excess_yield_paid_usdt0(env: Env) -> i128 {
+        get_i128_or_default(&env, &DataKey::TotalExcessYieldPaidUsdt0)
+    }
+
     /// Returns the latest recorded yield settlement epoch.
     pub fn latest_settlement_epoch(env: Env) -> u64 {
         get_u64(&env, &DataKey::LatestSettlementEpoch)
@@ -760,6 +782,11 @@ fn get_address(env: &Env, key: &DataKey) -> Address {
 /// Returns the `i128` value stored at `key`.
 fn get_i128(env: &Env, key: &DataKey) -> i128 {
     env.storage().instance().get(key).unwrap()
+}
+
+/// Returns the `i128` value stored at `key`, or `0` when the key is absent.
+fn get_i128_or_default(env: &Env, key: &DataKey) -> i128 {
+    env.storage().instance().get(key).unwrap_or(0)
 }
 
 /// Returns the `u64` value stored at `key`.

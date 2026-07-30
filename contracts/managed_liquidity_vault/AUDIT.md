@@ -43,3 +43,18 @@ We added these checks to the constructor:
   (`TokenDecimalsMustMatch`). The collateral coverage check does not
   normalize the token precision, so equal precision is necessary. The
   constructor rejects a 6-decimal `USDT0` at deployment.
+
+## RAILS-3 — "Record excess yield payments"
+
+**Severity:** Informational. **Status:** Fixed.
+
+`pay_yield` now records the payment surplus above the outstanding
+debt in `TotalExcessYieldPaidUsdt0`, read with the new view
+`total_excess_yield_paid_usdt0()`, and in the new `excess` field of
+`YieldPaidEvt`. The full payment is still credited to collected
+yield. The excess does not offset the due amount of a later
+settlement epoch; that stays an off-chain settlement decision.
+
+Operational note: the `Exchange` must record a settlement epoch
+before it pays that epoch. A payment before the record is booked as
+excess, and it does not decrease the debt that the record adds later.
