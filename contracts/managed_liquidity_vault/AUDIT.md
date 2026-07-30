@@ -93,3 +93,24 @@ contract does not change.
   permissionless. The method can only move value into the vault.
   Integrators must not use the payer identity as an authorization
   signal.
+
+## S1 — "Record yield obligation"
+
+**Status:** Acknowledged.
+
+We keep the yield obligation off-chain in this revision. An on-chain
+obligation makes the vault the authoritative source of the commercial
+agreement, and each term change still arrives as an authenticated
+exchange submission. These reconciliation controls apply instead:
+
+- Each settlement is authenticated and epoch-monotonic, and the vault
+  emits it as `YieldSettlementEvt`. The full obligation history is
+  reconstructible from events.
+- `LastYieldSettlementReferenceHash` binds each epoch to a retained
+  off-chain settlement package.
+- `CollectedYieldUsdt0` increases only with a real token transfer.
+  `TotalExcessYieldPaidUsdt0` records payments above the recorded
+  debt.
+
+On-chain publication of the obligation parameters stays a candidate
+for a future revision.
