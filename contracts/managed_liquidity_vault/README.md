@@ -72,7 +72,36 @@ The contract defines two main high-trust identities (`FundingPartner` and `Excha
 | `record_yield_settlement`    | `Exchange`                                    | Records yield due for a settlement epoch and collects paid yield.                    |
 | `pay_yield`                  | `from` (Caller)                               | Transfers `USDT0` yield tokens into the vault (open to any approved payer).          |
 | `withdraw_partner_yield`     | `FundingPartner`                              | Withdraws accumulated `USDT0` yield from the vault.                                  |
+| `recover_unaccounted_tokens` | `Exchange`                                    | Recovers token balances that the vault ledger does not account for.                  |
 | `upgrade`                    | **Dual-Sign** (`Exchange` + `FundingPartner`) | Upgrades the contract's Wasm code hash.                                              |
+
+### Recovery of Unaccounted Tokens
+
+The vault holds real token balances, but only moves them through the principal
+and yield flows it tracks. Two situations leave value stranded:
+
+1. A third-party token is sent to the vault address. The vault has no ledger
+   entry for it and no other entrypoint can move it.
+2. The configured principal or yield token is transferred to the vault directly,
+   bypassing `deposit_partner`, `pay_yield`, or `record_yield_settlement`. The
+   real balance grows but `PartnerPrincipalXlm` / `CollectedYieldUsdt0` do not,
+   so the surplus sits above what any withdrawal can reach.
+
+`recover_unaccounted_tokens(token, to, amount)` recovers both cases. (The audit
+refers to this as a sweep path; the entrypoint is named after the finding's
+recommendation of a "carefully-authorized recovery path".) The recoverable
+amount is reported by the `unaccounted_balance(token)` view:
+
+- For the configured principal token: `balance − PartnerPrincipalXlm`.
+- For the configured yield token: `balance − CollectedYieldUsdt0`.
+- For any other token: the full balance.
+
+The surplus is floored at zero, so tracked principal and collected yield can
+never leave through this path — recovery cannot be used to drain partner funds
+or to bypass the dual-signed principal withdrawal. Recovery is authorized by the
+`Exchange` alone and emits `UnaccountedTokensRecoveredEvt`; returning recovered
+funds to their rightful owner is an off-chain operational responsibility of the
+`Exchange`.
 
 ---
 
