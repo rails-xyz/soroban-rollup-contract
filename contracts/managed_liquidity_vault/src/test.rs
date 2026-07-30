@@ -1,6 +1,7 @@
 extern crate std;
 
 use soroban_sdk::{
+    contract, contractimpl, symbol_short,
     testutils::Address as _,
     testutils::{MockAuth, MockAuthInvoke},
     token::{StellarAssetClient, TokenClient},
@@ -10,6 +11,27 @@ use soroban_sdk::{
 use super::contract::{ManagedLiquidityVaultContract, ManagedLiquidityVaultContractClient};
 
 const LEDGER_BUMP: u32 = 1_000_000;
+
+/// Minimal token stub used to exercise constructor validation against a token
+/// contract whose precision differs from the Stellar 7-decimal standard.
+#[contract]
+pub struct DecimalsOnlyToken;
+
+#[contractimpl]
+impl DecimalsOnlyToken {
+    pub fn __constructor(env: Env, decimals: u32) {
+        env.storage()
+            .instance()
+            .set(&symbol_short!("decimals"), &decimals);
+    }
+
+    pub fn decimals(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("decimals"))
+            .unwrap()
+    }
+}
 
 fn create_token_contract<'a>(
     env: &Env,
@@ -145,6 +167,103 @@ fn test_constructor_validation_errors() {
         },
         21,
     );
+
+    // A role address must not be one of the configured token contracts.
+    assert_contract_error(
+        || {
+            env.register(
+                ManagedLiquidityVaultContract,
+                (
+                    &xlm_client.address,
+                    &yield_client.address,
+                    &yield_client.address,
+                    &funding_partner,
+                ),
+            );
+        },
+        24,
+    );
+    assert_contract_error(
+        || {
+            env.register(
+                ManagedLiquidityVaultContract,
+                (
+                    &xlm_client.address,
+                    &yield_client.address,
+                    &exchange,
+                    &xlm_client.address,
+                ),
+            );
+        },
+        24,
+    );
+
+    // Tokens with mismatched precision break the collateral coverage check, so
+    // deployment must fail rather than defer the check to off-chain review.
+    let six_decimals_token = env.register(DecimalsOnlyToken, (6u32,));
+    assert_contract_error(
+        || {
+            env.register(
+                ManagedLiquidityVaultContract,
+                (
+                    &xlm_client.address,
+                    &six_decimals_token,
+                    &exchange,
+                    &funding_partner,
+                ),
+            );
+        },
+        25,
+    );
+
+    // A matching-precision token contract is accepted.
+    let seven_decimals_token = env.register(DecimalsOnlyToken, (7u32,));
+    env.register(
+        ManagedLiquidityVaultContract,
+        (
+            &xlm_client.address,
+            &seven_decimals_token,
+            &exchange,
+            &funding_partner,
+        ),
+    );
+}
+
+#[test]
+fn test_constructor_rejects_non_token_addresses() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let exchange = Address::generate(&env);
+    let funding_partner = Address::generate(&env);
+    let xlm_admin = Address::generate(&env);
+    let (xlm_client, _) = create_token_contract(&env, &xlm_admin);
+    let not_a_token = Address::generate(&env);
+
+    // Addresses that are not live token contracts abort deployment instead of
+    // producing a vault that can never move funds.
+    assert_panics(|| {
+        env.register(
+            ManagedLiquidityVaultContract,
+            (
+                &not_a_token,
+                &xlm_client.address,
+                &exchange,
+                &funding_partner,
+            ),
+        );
+    });
+    assert_panics(|| {
+        env.register(
+            ManagedLiquidityVaultContract,
+            (
+                &xlm_client.address,
+                &not_a_token,
+                &exchange,
+                &funding_partner,
+            ),
+        );
+    });
 }
 
 #[test]

@@ -75,6 +75,26 @@ The contract defines two main high-trust identities (`FundingPartner` and `Excha
 | `recover_unaccounted_tokens` | `Exchange`                                    | Recovers token balances that the vault ledger does not account for.                  |
 | `upgrade`                    | **Dual-Sign** (`Exchange` + `FundingPartner`) | Upgrades the contract's Wasm code hash.                                              |
 
+### Constructor Validation
+
+The role and token addresses are immutable after deployment, so the constructor
+rejects any configuration that would produce an unusable or unsound vault:
+
+- `xlm_token` and `yield_token` must differ, and `exchange` and
+  `funding_partner` must differ.
+- Neither role address may be one of the two token contracts.
+- Both token addresses are probed through the SEP-41 `decimals` entrypoint.
+  An address that is not a live contract implementing the token interface makes
+  deployment fail, instead of yielding a vault whose transfers can never
+  succeed.
+- Both tokens must report the **same decimal precision**. The collateral
+  coverage check cancels `RATE_SCALE` but does not normalize token precision, so
+  it is only correct when the principal and yield tokens share the same number
+  of decimals. Pinning this at construction turns a pre-deployment review item
+  into an enforced on-chain constraint. The intended deployment uses XLM (7
+  decimals) and a 7-decimal `USDT0` issuance on Stellar; a 6-decimal `USDT0`
+  would be rejected at deployment rather than silently mis-priced.
+
 ### Recovery of Unaccounted Tokens
 
 The vault holds real token balances, but only moves them through the principal
