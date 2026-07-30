@@ -69,6 +69,8 @@ pub enum ContractError {
     ArithmeticOverflow = 19,
     PrincipalAndYieldTokenMustDiffer = 20,
     ExchangeAndPartnerMustDiffer = 21,
+    RecoverAmountMustBePositive = 22,
+    InsufficientUnaccountedBalance = 23,
 }
 
 /// Managed liquidity vault contract.
@@ -122,6 +124,16 @@ pub struct YieldPaidEvt {
 #[contractevent]
 #[derive(Clone)]
 pub struct PartnerYieldOutEvt {
+    pub to: Address,
+    pub amount: i128,
+}
+
+/// Event emitted when tokens that the vault ledger does not account for are
+/// recovered from the vault.
+#[contractevent]
+#[derive(Clone)]
+pub struct UnaccountedTokensRecoveredEvt {
+    pub token: Address,
     pub to: Address,
     pub amount: i128,
 }
@@ -523,6 +535,73 @@ impl ManagedLiquidityVaultContract {
         Ok(())
     }
 
+    /// Recovers tokens that the vault ledger does not account for.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - Access to the Soroban environment.
+    /// * `token` - Token contract to recover balance from.
+    /// * `to` - Recipient of the recovered tokens.
+    /// * `amount` - Amount to recover.
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::RecoverAmountMustBePositive`] - If `amount <= 0`.
+    /// * [`ContractError::InsufficientUnaccountedBalance`] - If `amount`
+    ///   exceeds the unaccounted balance reported by
+    ///   [`Self::unaccounted_balance`].
+    /// * [`ContractError::ArithmeticOverflow`] - If the unaccounted balance
+    ///   computation overflows.
+    ///
+    /// # Notes
+    ///
+    /// * Authorization from `Exchange` is required.
+    /// * For the configured principal and yield tokens, only the surplus over
+    ///   the tracked ledger balance can leave through this method, so partner
+    ///   principal and collected yield stay withdrawable through their normal
+    ///   flows. Any other token can be recovered in full.
+    /// * Recovery is a manual, off-chain-reconciled operation: the `Exchange`
+    ///   is responsible for returning recovered funds to their rightful owner.
+    pub fn recover_unaccounted_tokens(
+        env: Env,
+        token: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        if amount <= 0 {
+            return Err(ContractError::RecoverAmountMustBePositive);
+        }
+        require_exchange_auth(&env);
+        extend_contract_ttl(&env);
+
+        let unaccounted = unaccounted_balance_of(&env, &token)?;
+        if amount > unaccounted {
+            return Err(ContractError::InsufficientUnaccountedBalance);
+        }
+
+        soroban_sdk::token::TokenClient::new(&env, &token).transfer(
+            &env.current_contract_address(),
+            &to,
+            &amount,
+        );
+
+        env.events()
+            .publish_event(&UnaccountedTokensRecoveredEvt { token, to, amount });
+        Ok(())
+    }
+
+    /// Returns the balance of `token` that the vault ledger does not account
+    /// for and that is therefore recoverable through
+    /// [`Self::recover_unaccounted_tokens`].
+    ///
+    /// # Errors
+    ///
+    /// * [`ContractError::ArithmeticOverflow`] - If the surplus computation
+    ///   overflows.
+    pub fn unaccounted_balance(env: Env, token: Address) -> Result<i128, ContractError> {
+        unaccounted_balance_of(&env, &token)
+    }
+
     /// Returns the exchange address.
     pub fn exchange(env: Env) -> Address {
         get_address(&env, &DataKey::Exchange)
@@ -685,6 +764,31 @@ fn ensure_reserve_covers_credit(
         return Err(ContractError::ReserveBelowRequiredCollateral);
     }
     Ok(())
+}
+
+/// Returns the balance of `token` held by the vault that is not backed by a
+/// vault ledger entry.
+///
+/// The principal token is backed by `PartnerPrincipalXlm` (the sum of free and
+/// reserved principal) and the yield token by `CollectedYieldUsdt0`. Any other
+/// token has no ledger backing, so its whole balance is unaccounted for.
+///
+/// The result is floored at zero so a token balance that is (unexpectedly)
+/// below the tracked ledger amount never reports a recoverable surplus.
+fn unaccounted_balance_of(env: &Env, token: &Address) -> Result<i128, ContractError> {
+    let balance =
+        soroban_sdk::token::TokenClient::new(env, token).balance(&env.current_contract_address());
+
+    let tracked = if *token == get_address(env, &DataKey::XlmToken) {
+        get_i128(env, &DataKey::PartnerPrincipalXlm)
+    } else if *token == get_address(env, &DataKey::YieldToken) {
+        get_i128(env, &DataKey::CollectedYieldUsdt0)
+    } else {
+        0
+    };
+
+    let surplus = checked_sub(balance, tracked)?;
+    Ok(surplus.max(0))
 }
 
 /// Multiplies two `i128` values and converts overflow into a contract error.

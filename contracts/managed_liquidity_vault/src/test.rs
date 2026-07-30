@@ -542,6 +542,125 @@ fn test_zero_credit_reserve_and_yield_balance() {
 }
 
 #[test]
+fn test_recover_third_party_token_in_full() {
+    let env = Env::default();
+    let (_exchange, _funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);
+
+    let stray_admin = Address::generate(&env);
+    let (stray_client, stray_admin_client) = create_token_contract(&env, &stray_admin);
+    let recipient = Address::generate(&env);
+    let stray_amount = 55_0000000;
+
+    // A third party mis-sends a token the vault does not know about.
+    stray_admin_client.mint(&client.address, &stray_amount);
+    assert_eq!(
+        client.unaccounted_balance(&stray_client.address),
+        stray_amount
+    );
+
+    client.recover_unaccounted_tokens(&stray_client.address, &recipient, &stray_amount);
+
+    assert_eq!(stray_client.balance(&recipient), stray_amount);
+    assert_eq!(client.unaccounted_balance(&stray_client.address), 0);
+}
+
+#[test]
+fn test_recover_surplus_of_configured_tokens_only() {
+    let env = Env::default();
+    let (exchange, funding_partner, xlm_client, yield_client, client) = deploy_fixture(&env);
+
+    let deposit_amount = 10_000_0000000;
+    let settlement_paid = 4_0000000;
+    let stray_xlm = 7_0000000;
+    let stray_yield = 3_0000000;
+    let recipient = Address::generate(&env);
+
+    xlm_client.approve(
+        &funding_partner,
+        &client.address,
+        &deposit_amount,
+        &LEDGER_BUMP,
+    );
+    client.deposit_partner(&deposit_amount);
+    yield_client.approve(&exchange, &client.address, &settlement_paid, &LEDGER_BUMP);
+    client.record_yield_settlement(&1u64, &settlement_paid, &settlement_paid, &None);
+
+    // Tracked balances are never unaccounted for.
+    assert_eq!(client.unaccounted_balance(&xlm_client.address), 0);
+    assert_eq!(client.unaccounted_balance(&yield_client.address), 0);
+
+    // Direct transfers that bypass deposit_partner / pay_yield are recoverable.
+    xlm_client.transfer(&funding_partner, &client.address, &stray_xlm);
+    yield_client.transfer(&exchange, &client.address, &stray_yield);
+    assert_eq!(client.unaccounted_balance(&xlm_client.address), stray_xlm);
+    assert_eq!(
+        client.unaccounted_balance(&yield_client.address),
+        stray_yield
+    );
+
+    // Recovering beyond the surplus is rejected, so tracked principal and yield
+    // stay withdrawable through their normal flows.
+    assert_contract_error(
+        || client.recover_unaccounted_tokens(&xlm_client.address, &recipient, &(stray_xlm + 1)),
+        23,
+    );
+    assert_contract_error(
+        || client.recover_unaccounted_tokens(&yield_client.address, &recipient, &(stray_yield + 1)),
+        23,
+    );
+
+    client.recover_unaccounted_tokens(&xlm_client.address, &recipient, &stray_xlm);
+    client.recover_unaccounted_tokens(&yield_client.address, &recipient, &stray_yield);
+
+    assert_eq!(xlm_client.balance(&recipient), stray_xlm);
+    assert_eq!(yield_client.balance(&recipient), stray_yield);
+    assert_eq!(client.partner_principal_xlm(), deposit_amount);
+    assert_eq!(client.collected_yield_usdt0(), settlement_paid);
+    assert_eq!(client.xlm_balance(), deposit_amount);
+    assert_eq!(client.yield_balance(), settlement_paid);
+}
+
+#[test]
+fn test_recover_validation_and_authorization() {
+    let env = Env::default();
+    let (exchange, funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);
+
+    let stray_admin = Address::generate(&env);
+    let (stray_client, stray_admin_client) = create_token_contract(&env, &stray_admin);
+    let recipient = Address::generate(&env);
+    let stray_amount = 9_0000000;
+    stray_admin_client.mint(&client.address, &stray_amount);
+
+    assert_contract_error(
+        || client.recover_unaccounted_tokens(&stray_client.address, &recipient, &0),
+        22,
+    );
+
+    // Recovery is authorized by the exchange alone.
+    let _ = env.auths();
+    client.recover_unaccounted_tokens(&stray_client.address, &recipient, &stray_amount);
+    let addresses: std::vec::Vec<_> = env.auths().into_iter().map(|(addr, _)| addr).collect();
+    assert!(addresses.contains(&exchange));
+    assert!(!addresses.contains(&funding_partner));
+
+    // The funding partner cannot authorize recovery on its own.
+    stray_admin_client.mint(&client.address, &stray_amount);
+    assert_panics(|| {
+        client
+            .mock_auths(&[MockAuth {
+                address: &funding_partner,
+                invoke: &MockAuthInvoke {
+                    contract: &client.address,
+                    fn_name: "recover_unaccounted_tokens",
+                    args: (&stray_client.address, &recipient, &stray_amount).into_val(&env),
+                    sub_invokes: &[],
+                },
+            }])
+            .recover_unaccounted_tokens(&stray_client.address, &recipient, &stray_amount)
+    });
+}
+
+#[test]
 fn test_upgrade_requires_exchange_auth() {
     let env = Env::default();
     let (exchange, funding_partner, _xlm_client, _yield_client, client) = deploy_fixture(&env);
