@@ -75,6 +75,33 @@ The contract defines two main high-trust identities (`FundingPartner` and `Excha
 | `recover_unaccounted_tokens` | `Exchange`                                    | Recovers token balances that the vault ledger does not account for.                  |
 | `upgrade`                    | **Dual-Sign** (`Exchange` + `FundingPartner`) | Upgrades the contract's Wasm code hash.                                              |
 
+### Why Principal Withdrawal Stays Dual-Signed
+
+`withdraw_partner_principal` is limited to `FreePrincipalXlm`, so it can never
+touch collateral the `Exchange` has reserved. That makes a partner-only
+withdrawal look safe on-chain, but the dual signature is retained deliberately:
+
+- **`set_reserve` is a periodic posting, not a live measurement.** The reserved
+  amount reflects off-chain credit as of the last exchange submission. Between
+  submissions, real exposure can move — through XLM price moves against the
+  reserved collateral or through intra-epoch credit drawdown — so principal that
+  is "free" against the last posting is not necessarily free against current
+  exposure. The co-sign gives the `Exchange` the opportunity to post an updated
+  reserve before principal leaves, instead of discovering the shortfall after.
+- **Outstanding yield debt is not collateralized.** The partner can hold
+  unpaid `YieldDebtUsdt0` while withdrawing principal; requiring both signatures
+  keeps the wind-down of the position a joint action rather than a unilateral
+  one.
+- **The vault mirrors a bilateral agreement.** Both parties co-signing each
+  principal movement is the on-chain expression of the off-chain contract and
+  gives each side non-repudiable evidence of the other's approval
+  (`Repudiate.2` in the STRIDE model).
+
+The accepted cost is a shared liveness dependency: if either key is unavailable,
+principal withdrawal is blocked. This is tracked as `DoS.1` / `DoS.2` in the
+STRIDE model and is handled through resilient custody and signing procedures on
+both sides.
+
 ### Constructor Validation
 
 The role and token addresses are immutable after deployment, so the constructor
