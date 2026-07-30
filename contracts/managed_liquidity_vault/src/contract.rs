@@ -71,6 +71,8 @@ pub enum ContractError {
     ExchangeAndPartnerMustDiffer = 21,
     RecoverAmountMustBePositive = 22,
     InsufficientUnaccountedBalance = 23,
+    RoleAddressMustNotBeToken = 24,
+    TokenDecimalsMustMatch = 25,
 }
 
 /// Managed liquidity vault contract.
@@ -152,10 +154,25 @@ impl ManagedLiquidityVaultContract {
     /// * `funding_partner` - Address authorized to deposit principal and
     ///   withdraw collected yield.
     ///
+    /// # Errors
+    ///
+    /// * [`ContractError::PrincipalAndYieldTokenMustDiffer`] - If both token
+    ///   addresses are the same.
+    /// * [`ContractError::ExchangeAndPartnerMustDiffer`] - If both role
+    ///   addresses are the same.
+    /// * [`ContractError::RoleAddressMustNotBeToken`] - If a role address is
+    ///   one of the configured token contracts.
+    /// * [`ContractError::TokenDecimalsMustMatch`] - If the two token contracts
+    ///   report different decimal precisions.
+    ///
     /// # Notes
     ///
     /// * Upgrades require only the configured `Exchange`.
     /// * Principal and yield balances are initialized to zero.
+    /// * Both token addresses are probed through the SEP-41 `decimals`
+    ///   entrypoint. Deployment fails if an address is not a live contract
+    ///   that exposes `decimals`. The probe does not prove the full token
+    ///   interface.
     pub fn __constructor(
         env: Env,
         xlm_token: Address,
@@ -168,6 +185,29 @@ impl ManagedLiquidityVaultContract {
         }
         if exchange == funding_partner {
             panic_with_error!(&env, ContractError::ExchangeAndPartnerMustDiffer);
+        }
+        if exchange == xlm_token
+            || exchange == yield_token
+            || funding_partner == xlm_token
+            || funding_partner == yield_token
+        {
+            panic_with_error!(&env, ContractError::RoleAddressMustNotBeToken);
+        }
+
+        // Probing `decimals` proves both addresses are live contracts that
+        // expose the `decimals` entrypoint. The probe does not prove the full
+        // SEP-41 interface; that stays a pre-deployment review item, and a
+        // wrong token is corrected with a new deployment.
+        let xlm_decimals = soroban_sdk::token::TokenClient::new(&env, &xlm_token).decimals();
+        let yield_decimals = soroban_sdk::token::TokenClient::new(&env, &yield_token).decimals();
+
+        // `ensure_reserve_covers_credit` compares a principal amount scaled by
+        // `exchange_rate` against a yield amount and cancels only `RATE_SCALE`,
+        // so the coverage check is sound only while both tokens share the same
+        // precision. Pin that assumption at deployment instead of relying on
+        // an off-chain pre-deployment check.
+        if xlm_decimals != yield_decimals {
+            panic_with_error!(&env, ContractError::TokenDecimalsMustMatch);
         }
 
         let instance = env.storage().instance();

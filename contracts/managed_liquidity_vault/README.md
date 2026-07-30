@@ -65,7 +65,7 @@ The contract defines two main high-trust identities (`FundingPartner` and `Excha
 
 | Function                     | Authorization Requirement                     | Description                                                                          |
 | :--------------------------- | :-------------------------------------------- | :----------------------------------------------------------------------------------- |
-| `__constructor`              | _None_                                        | Initializes contract state, token links, and role addresses.                         |
+| `__constructor`              | _None_                                        | Initializes contract state. Validates the token and role configuration.              |
 | `deposit_partner`            | `FundingPartner`                              | Transfers `XLM` from the partner into the vault. Increases total and free principal. |
 | `withdraw_partner_principal` | **Dual-Sign** (`Exchange` + `FundingPartner`) | Withdraws unreserved `XLM` principal from the vault.                                 |
 | `set_reserve`                | `Exchange`                                    | Sets the amount of `XLM` locked as collateral. Checks collateral coverage.           |
