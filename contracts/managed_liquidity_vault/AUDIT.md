@@ -76,3 +76,20 @@ We keep the dual signature on `withdraw_partner_principal`:
 
 The accepted cost is the shared liveness dependency tracked as
 `DoS.1` / `DoS.2` in the STRIDE model.
+
+## RAILS-5 — "Discrepancies with Documentation"
+
+**Severity:** Informational. **Status:** Fixed.
+
+We updated the design document and the README. The behavior of the
+contract does not change.
+
+- The documentation now states that the `Exchange` alone holds the
+  upgrade authority and that there is no `Owner` role. This is an
+  intentional centralization. The business partnership contract and
+  the upgrade review procedures bound the residual risk off-chain
+  (`Spoof.3`, `Elevation.1` in the STRIDE model).
+- The documentation now states that `pay_yield` is intentionally
+  permissionless. The method can only move value into the vault.
+  Integrators must not use the payer identity as an authorization
+  signal.

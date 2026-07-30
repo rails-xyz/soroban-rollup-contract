@@ -51,8 +51,7 @@ flowchart LR
     FP -->|"withdraw_partner_yield(...)"| VAULT
     FP -->|"co-sign withdraw_partner_principal(...)"| VAULT
     EX -->|"co-sign withdraw_partner_principal(...)"| VAULT
-    EX -->|"co-sign upgrade(...)"| VAULT
-    FP -->|"co-sign upgrade(...)"| VAULT
+    EX -->|"upgrade(...)"| VAULT
     EX -.->|"reserve calculations"| OPS
     OPS -.->|"reference packages & hashes"| EX
 ```
@@ -73,7 +72,7 @@ The contract defines two main high-trust identities (`FundingPartner` and `Excha
 | `pay_yield`                  | `from` (Caller)                               | Transfers `USDT0` yield tokens into the vault (open to any approved payer).          |
 | `withdraw_partner_yield`     | `FundingPartner`                              | Withdraws accumulated `USDT0` yield from the vault.                                  |
 | `recover_unaccounted_tokens` | `Exchange`                                    | Recovers token balances that the vault ledger does not account for.                  |
-| `upgrade`                    | **Dual-Sign** (`Exchange` + `FundingPartner`) | Upgrades the contract's Wasm code hash.                                              |
+| `upgrade`                    | `Exchange`                                    | Upgrades the contract's Wasm code hash. The funding partner does **not** co-sign.    |
 
 The rationale for these authorization decisions is in [AUDIT.md](./AUDIT.md).
 
@@ -120,9 +119,9 @@ All contract state is stored in the contract instance storage (`Storage::instanc
 
 A STRIDE threat analysis is maintained in [stride-threat-model.md](./src/stride-threat-model.md). Key security design decisions include:
 
-- **Authentication & Gating**: Every state-changing function requires explicit `.require_auth()` verification of the actor. The upgrade method and principal withdrawals require a joint multi-sig pattern where both parties must submit authorization.
+- **Authentication & Gating**: Every state-changing function requires explicit `.require_auth()` verification of the actor. Principal withdrawal requires authorization from both parties; contract upgrades require the `Exchange` alone.
 - **Off-chain Input Tampering**: The contract does not verify the accuracy of the exchange rate or credit level. Off-chain reconciliation workflows must monitor `set_reserve` and `record_yield_settlement` events against trusted internal risk engine logs using the `reference_hash`.
-- **Liveness Dependency**: If either the `Exchange` or `FundingPartner` key is lost or compromised, principal withdrawals and code upgrades are blocked. Strong multi-sig custody models must be implemented off-chain for both keys.
+- **Liveness Dependency**: If either the `Exchange` or `FundingPartner` key is lost or compromised, principal withdrawals are blocked. Code upgrades depend on the `Exchange` key alone. Strong multi-sig custody models must be implemented off-chain for both keys.
 - **Instance Expiry (TTL)**: To prevent contract entries or Wasm bytecode from expiring due to low activity, `extend_contract_ttl` bumps instance TTL to $\sim 30$ days whenever state changes.
 
 ---
