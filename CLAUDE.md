@@ -42,9 +42,9 @@ The `RollupContract` manages deposits, withdrawals, and fee collection for a Lay
 ### Key Dependencies
 
 - `stellar-cli`: For building and optimizing Soroban contracts
-- `soroban-sdk`: Core Soroban SDK (v23)
-- `stellar-access`: Provides `ownable` module and `#[only_owner]` macro for access control
-- `stellar-macros`: Procedural macros for contract development
+- `soroban-sdk`: Core Soroban SDK (v26)
+- `stellar-access`: Provides `ownable` module for access control
+- `stellar-macros`: Procedural macros for contract development, including `#[only_owner]`
 
 ### Storage Keys (DataKey enum)
 
