@@ -74,7 +74,7 @@ contracts/rollup
 └── README.md
 ```
 
-The crate is a member of the workspace at the repository root, next to the `managed_liquidity_vault` and `mock_usdt` contracts.
+The crate is a member of the workspace at the repository root, next to the `managed_liquidity_vault` contract.
 
 ## Build Commands
 

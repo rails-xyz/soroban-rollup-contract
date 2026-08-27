@@ -1,4 +1,4 @@
-# Soroban Contracts
+# Rails Soroban Contracts
 
 Rails Soroban smart contracts for the Stellar network.
 
@@ -8,7 +8,6 @@ Rails Soroban smart contracts for the Stellar network.
 | :------------------------------------------------------------------- | :------------------------- | :------------------------------------------------------------------------------ |
 | [contracts/rollup](./contracts/rollup)                               | `rollup-contract`          | Collateral pool for a rollup: deposits, withdrawal allowances, and fees.        |
 | [contracts/managed_liquidity_vault](./contracts/managed_liquidity_vault) | `managed-liquidity-vault`  | Custody and settlement layer between a funding partner and the exchange.        |
-| [contracts/mock_usdt](./contracts/mock_usdt)                         | `mock-usdt`                | SEP-41 test token used in local and staging environments.                       |
 
 Each contract directory holds its own README with the build, test, and deployment details.
 
