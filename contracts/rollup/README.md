@@ -135,9 +135,9 @@ stellar contract deploy \
 
 ## Dependencies
 
-- `soroban-sdk`: Core Soroban SDK (v23).
-- `stellar-access`: Provides the `ownable` module and the `#[only_owner]` macro for access control.
-- `stellar-contract-utils`: Provides the upgradeable support used by `upgrade`.
-- `stellar-macros`: Procedural macros, including `#[derive(Upgradeable)]`.
+- `soroban-sdk`: Core Soroban SDK (v26).
+- `stellar-access`: Provides the `ownable` module for access control.
+- `stellar-contract-utils`: Provides the `Upgradeable` trait and the `upgrade` helper that `upgrade` calls.
+- `stellar-macros`: Procedural macros, including the `#[only_owner]` macro.
 
 Collateral transfers use `soroban_sdk::token::TokenClient`. The `stellar-tokens` entry in `Cargo.toml` is not referenced by the contract source.
