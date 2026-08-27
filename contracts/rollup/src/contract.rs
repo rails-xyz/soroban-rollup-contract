@@ -13,10 +13,10 @@ use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
     BytesN, Env, Vec,
 };
-use stellar_contract_utils::upgradeable::UpgradeableInternal;
+use stellar_contract_utils::upgradeable::{self, Upgradeable};
 
 use stellar_access::ownable;
-use stellar_macros::{only_owner, Upgradeable};
+use stellar_macros::only_owner;
 
 /// Approximate number of ledgers produced in one day (~5s close time).
 const DAY_IN_LEDGERS: u32 = 17_280;
@@ -80,7 +80,6 @@ pub enum ContractError {
 }
 
 /// Rollup contract.
-#[derive(Upgradeable)]
 #[contract]
 pub struct RollupContract;
 
@@ -539,14 +538,18 @@ impl RollupContract {
     }
 }
 
-impl UpgradeableInternal for RollupContract {
-    /// Requires authorization from the upgrade owner.
-    fn _require_auth(e: &Env, operator: &Address) {
+#[contractimpl]
+impl Upgradeable for RollupContract {
+    /// Replaces the contract Wasm with `new_wasm_hash`. Requires authorization
+    /// from the owner.
+    fn upgrade(e: &Env, new_wasm_hash: BytesN<32>, operator: Address) {
         operator.require_auth();
         let owner = ownable::get_owner(e).unwrap();
-        if *operator != owner {
+        if operator != owner {
             panic_with_error!(e, ContractError::Unauthorized);
         }
+
+        upgradeable::upgrade(e, &new_wasm_hash);
     }
 }
 

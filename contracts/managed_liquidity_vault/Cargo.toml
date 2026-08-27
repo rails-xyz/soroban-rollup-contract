@@ -10,9 +10,9 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
-stellar-access = "0.5.0"
-stellar-contract-utils = "0.5.0"
-stellar-macros = "0.5.0"
+stellar-access = "0.7.2"
+stellar-contract-utils = "0.7.2"
+stellar-macros = "0.7.2"
 cvlr = { version = "0.4.1", default-features = false, optional = true }
 cvlr-soroban = { version = "0.4.0", optional = true }
 cvlr-soroban-derive = { version = "0.4.0", optional = true }

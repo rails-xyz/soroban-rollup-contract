@@ -15,8 +15,7 @@ use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
     BytesN, Env,
 };
-use stellar_contract_utils::upgradeable::UpgradeableInternal;
-use stellar_macros::Upgradeable;
+use stellar_contract_utils::upgradeable::{self, Upgradeable};
 
 const RATE_SCALE: i128 = 10_000_000;
 
@@ -77,7 +76,6 @@ pub enum ContractError {
 }
 
 /// Managed liquidity vault contract.
-#[derive(Upgradeable)]
 #[contract]
 pub struct ManagedLiquidityVaultContract;
 
@@ -751,13 +749,18 @@ impl ManagedLiquidityVaultContract {
     }
 }
 
-impl UpgradeableInternal for ManagedLiquidityVaultContract {
-    fn _require_auth(e: &Env, operator: &Address) {
+#[contractimpl]
+impl Upgradeable for ManagedLiquidityVaultContract {
+    /// Replaces the contract Wasm with `new_wasm_hash`. Requires authorization
+    /// from the exchange.
+    fn upgrade(e: &Env, new_wasm_hash: BytesN<32>, operator: Address) {
         operator.require_auth();
         let exchange = get_address(e, &DataKey::Exchange);
-        if *operator != exchange {
+        if operator != exchange {
             panic_with_error!(e, ContractError::Unauthorized);
         }
+
+        upgradeable::upgrade(e, &new_wasm_hash);
     }
 }
 
