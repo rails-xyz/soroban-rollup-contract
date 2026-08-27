@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/rollup_contract.wasm", sha256 =
-    "7095bf181fb938b01fd7fcfbf390165b38cc93d10dc99d5a35a2ec43d988feb7"
+    "e00676b7bfe9afb3d37f0a0f25537e31683f3332ebc27fe1638acabdacc8fe7e"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -57,55 +57,7 @@ pub trait Contract {
     );
     fn withdrawal_allowances(env: soroban_sdk::Env, user: soroban_sdk::Address) -> i128;
 }
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RoleAccountKey {
-    pub index: u32,
-    pub role: soroban_sdk::Symbol,
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum DataKey {
-    LatestBlockHash,
-    CollateralToken,
-    WithdrawalAllowances(soroban_sdk::Address),
-    Fees,
-    TotalWithdrawable,
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum AccessControlStorageKey {
-    RoleAccounts(RoleAccountKey),
-    HasRole(soroban_sdk::Address, soroban_sdk::Symbol),
-    RoleAccountsCount(soroban_sdk::Symbol),
-    RoleAdmin(soroban_sdk::Symbol),
-    Admin,
-    PendingAdmin,
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum OwnableStorageKey {
-    Owner,
-    PendingOwner,
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum MerkleDistributorStorageKey {
-    Root,
-    Claimed(u32),
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum Rounding {
-    Floor,
-    Ceil,
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum PausableStorageKey {
-    Paused,
-}
-#[soroban_sdk::contracterror(export = false)]
+#[soroban_sdk::contracterror]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ContractError {
     DepositAmountMustBePositive = 1,
@@ -126,168 +78,31 @@ pub enum ContractError {
     Unauthorized = 62,
     ArithmeticOverflow = 71,
 }
-#[soroban_sdk::contracterror(export = false)]
+#[soroban_sdk::contracterror]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum RoleTransferError {
     NoPendingTransfer = 2200,
     InvalidLiveUntilLedger = 2201,
     InvalidPendingAccount = 2202,
+    TransferExpired = 2203,
 }
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum AccessControlError {
-    Unauthorized = 2000,
-    AdminNotSet = 2001,
-    IndexOutOfBounds = 2002,
-    AdminRoleNotFound = 2003,
-    RoleCountIsNotZero = 2004,
-    RoleNotFound = 2005,
-    AdminAlreadySet = 2006,
-    RoleNotHeld = 2007,
-    RoleIsEmpty = 2008,
-}
-#[soroban_sdk::contracterror(export = false)]
+#[soroban_sdk::contracterror]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum OwnableError {
     OwnerNotSet = 2100,
     TransferInProgress = 2101,
     OwnerAlreadySet = 2102,
 }
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum UpgradeableError {
-    MigrationNotAllowed = 1100,
-}
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum MerkleDistributorError {
-    RootNotSet = 1300,
-    IndexAlreadyClaimed = 1301,
-    InvalidProof = 1302,
-}
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum SorobanFixedPointError {
-    ZeroDenominator = 1500,
-    PhantomOverflow = 1501,
-    ResultOverflow = 1502,
-}
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum CryptoError {
-    MerkleProofOutOfBounds = 1400,
-    MerkleIndexOutOfBounds = 1401,
-    HasherEmptyState = 1402,
-}
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum PausableError {
-    EnforcedPause = 1000,
-    ExpectedPause = 1001,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["deposit_event"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct DepositEvent {
-    pub user: soroban_sdk::Address,
-    pub amount: i128,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["new_block_event"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct NewBlockEvent {
-    pub new_block_hash: soroban_sdk::BytesN<32>,
-    pub new_withdrawal_sum: i128,
-    pub new_fees: i128,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["withdrawal_event"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct WithdrawalEvent {
-    pub user: soroban_sdk::Address,
-    pub amount: i128,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["fees_collected_event"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct FeesCollectedEvent {
-    pub to: soroban_sdk::Address,
-    pub amount: i128,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["role_granted"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RoleGranted {
-    #[topic]
-    pub role: soroban_sdk::Symbol,
-    #[topic]
-    pub account: soroban_sdk::Address,
-    pub caller: soroban_sdk::Address,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["role_revoked"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RoleRevoked {
-    #[topic]
-    pub role: soroban_sdk::Symbol,
-    #[topic]
-    pub account: soroban_sdk::Address,
-    pub caller: soroban_sdk::Address,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["admin_renounced"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct AdminRenounced {
-    #[topic]
-    pub admin: soroban_sdk::Address,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["role_admin_changed"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct RoleAdminChanged {
-    #[topic]
-    pub role: soroban_sdk::Symbol,
-    pub previous_admin_role: soroban_sdk::Symbol,
-    pub new_admin_role: soroban_sdk::Symbol,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["admin_transfer_completed"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct AdminTransferCompleted {
-    #[topic]
-    pub new_admin: soroban_sdk::Address,
-    pub previous_admin: soroban_sdk::Address,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["admin_transfer_initiated"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct AdminTransferInitiated {
-    #[topic]
-    pub current_admin: soroban_sdk::Address,
-    pub new_admin: soroban_sdk::Address,
-    pub live_until_ledger: u32,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["ownership_transfer"])]
+#[soroban_sdk::contractevent(topics = ["ownership_transfer"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OwnershipTransfer {
     pub old_owner: soroban_sdk::Address,
     pub new_owner: soroban_sdk::Address,
     pub live_until_ledger: u32,
 }
-#[soroban_sdk::contractevent(export = false, topics = ["ownership_renounced"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct OwnershipRenounced {
-    pub old_owner: soroban_sdk::Address,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["ownership_transfer_completed"])]
+#[soroban_sdk::contractevent(topics = ["ownership_transfer_completed"])]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OwnershipTransferCompleted {
     pub new_owner: soroban_sdk::Address,
 }
-#[soroban_sdk::contractevent(export = false, topics = ["set_root"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct SetRoot {
-    pub root: soroban_sdk::Bytes,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["set_claimed"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct SetClaimed {
-    pub index: soroban_sdk::Val,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["paused"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Paused {}
-#[soroban_sdk::contractevent(export = false, topics = ["unpaused"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Unpaused {}
 

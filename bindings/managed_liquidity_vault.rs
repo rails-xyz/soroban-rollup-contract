@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/managed_liquidity_vault.wasm", sha256 =
-    "5f5e6e0cc9b5312bf82887b1b51bb5d67f22392f39850018815d5016b3f3de6f"
+    "b8adb410091b7440cae657712a6930765bec97df57aab5de25ea1ed35b3b4b09"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -82,43 +82,7 @@ pub trait Contract {
     fn total_excess_yield_paid_usdt0(env: soroban_sdk::Env) -> i128;
     fn last_set_reserve_exchange_rate(env: soroban_sdk::Env) -> i128;
 }
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum DataKey {
-    XlmToken,
-    YieldToken,
-    Exchange,
-    FundingPartner,
-    PartnerPrincipalXlm,
-    FreePrincipalXlm,
-    ReservedForExchangeXlm,
-    CollectedYieldUsdt0,
-    YieldDebtUsdt0,
-    LatestSettlementEpoch,
-    LastSetReserveExchangeRate,
-    LastSetReserveCredit,
-    LastReserveReferenceHash,
-    LastYieldSettlementReferenceHash,
-    TotalExcessYieldPaidUsdt0,
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum MerkleDistributorStorageKey {
-    Root,
-    Claimed(u32),
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum Rounding {
-    Floor,
-    Ceil,
-}
-#[soroban_sdk::contracttype(export = false)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum PausableStorageKey {
-    Paused,
-}
-#[soroban_sdk::contracterror(export = false)]
+#[soroban_sdk::contracterror]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ContractError {
     DepositAmountMustBePositive = 1,
@@ -143,102 +107,4 @@ pub enum ContractError {
     RoleAddressMustNotBeToken = 24,
     TokenDecimalsMustMatch = 25,
 }
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum UpgradeableError {
-    MigrationNotAllowed = 1100,
-}
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum MerkleDistributorError {
-    RootNotSet = 1300,
-    IndexAlreadyClaimed = 1301,
-    InvalidProof = 1302,
-}
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum SorobanFixedPointError {
-    ZeroDenominator = 1500,
-    PhantomOverflow = 1501,
-    ResultOverflow = 1502,
-}
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum CryptoError {
-    MerkleProofOutOfBounds = 1400,
-    MerkleIndexOutOfBounds = 1401,
-    HasherEmptyState = 1402,
-}
-#[soroban_sdk::contracterror(export = false)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub enum PausableError {
-    EnforcedPause = 1000,
-    ExpectedPause = 1001,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["yield_paid_evt"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct YieldPaidEvt {
-    pub amount: i128,
-    pub excess: i128,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["reserve_set_evt"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct ReserveSetEvt {
-    pub target_reserved_xlm: i128,
-    pub reference_credit_usdt0: i128,
-    pub exchange_rate: i128,
-    pub reference_hash: Option<soroban_sdk::BytesN<32>>,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["partner_deposit_evt"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct PartnerDepositEvt {
-    pub amount: i128,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["partner_yield_out_evt"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct PartnerYieldOutEvt {
-    pub to: soroban_sdk::Address,
-    pub amount: i128,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["yield_settlement_evt"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct YieldSettlementEvt {
-    pub epoch_id: u64,
-    pub yield_due_usdt0: i128,
-    pub yield_paid_usdt0: i128,
-    pub reference_hash: Option<soroban_sdk::BytesN<32>>,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["partner_principal_out_evt"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct PartnerPrincipalOutEvt {
-    pub to: soroban_sdk::Address,
-    pub amount: i128,
-}
-#[soroban_sdk::contractevent(
-    export = false,
-    topics = ["unaccounted_tokens_recovered_evt",
-    ]
-)]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct UnaccountedTokensRecoveredEvt {
-    pub token: soroban_sdk::Address,
-    pub to: soroban_sdk::Address,
-    pub amount: i128,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["set_root"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct SetRoot {
-    pub root: soroban_sdk::Bytes,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["set_claimed"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct SetClaimed {
-    pub index: soroban_sdk::Val,
-}
-#[soroban_sdk::contractevent(export = false, topics = ["paused"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Paused {}
-#[soroban_sdk::contractevent(export = false, topics = ["unpaused"])]
-#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Unpaused {}
 
