@@ -138,6 +138,26 @@ To compile the contract with Certora instrumentation:
 cargo build --target wasm32-unknown-unknown --release --features certora
 ```
 
+The Sunbeam scaffolding lives in `certora/` at the repository root and in [src/certora](./src/certora). Run the prover from the repository root:
+
+```bash
+# Activate the local Python environment so certoraSorobanProver is on PATH
+source .venv/bin/activate
+
+# Run a local compilation-only check
+cd certora
+certoraSorobanProver managed_liquidity_vault.conf --compilation_steps_only --short_output
+
+# Run the full prover job after setting CERTORAKEY
+certoraSorobanProver managed_liquidity_vault.conf
+```
+
+Notes:
+
+- The build script targets the Soroban artifact at `target/wasm32v1-none/release/managed_liquidity_vault.wasm`.
+- A workspace-local Cargo config in `.cargo/config.toml` disables a global GitHub HTTPS-to-SSH rewrite so public Certora dependencies can be fetched reliably.
+- To skip the virtualenv activation, run `../.venv/bin/certoraSorobanProver` from the `certora/` directory instead.
+
 ### Unit Tests
 
 A comprehensive test suite simulating deposits, withdrawals, reserve changes, and multi-sig operations is implemented in [test.rs](./src/test.rs).
