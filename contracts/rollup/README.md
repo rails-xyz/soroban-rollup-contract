@@ -107,9 +107,10 @@ cargo test --package rollup-contract test_deposit
 cargo check
 
 # Generate Rust bindings
+# `>|` overwrites the existing file also when the shell sets `noclobber`.
 stellar contract bindings rust \
   --wasm ./target/wasm32v1-none/release/rollup_contract.wasm \
-  --out ./bindings/rollup_contract.rs
+>| bindings/rollup_contract.rs
 ```
 
 `contracts/rollup/Makefile` wraps the common targets: `make build`, `make test`, `make fmt`, and `make clean`.
