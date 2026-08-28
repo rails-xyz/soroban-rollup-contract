@@ -384,6 +384,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "BlockHeight"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "CollateralToken"
                           }
                         ]

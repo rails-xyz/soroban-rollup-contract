@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/rollup_contract.wasm", sha256 =
-    "e00676b7bfe9afb3d37f0a0f25537e31683f3332ebc27fe1638acabdacc8fe7e"
+    "2387c3250c25d268e5fb367bea51be61471f2c391fcd5e6ba4acb16461731dee"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -36,6 +36,7 @@ pub trait Contract {
         env: soroban_sdk::Env,
         user: soroban_sdk::Address,
     ) -> Result<(), ContractError>;
+    fn block_height(env: soroban_sdk::Env) -> u32;
     fn collect_fees(
         env: soroban_sdk::Env,
         to: soroban_sdk::Address,

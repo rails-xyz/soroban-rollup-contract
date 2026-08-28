@@ -36,6 +36,7 @@ const PERSISTENT_LIFETIME_THRESHOLD: u32 = PERSISTENT_BUMP_AMOUNT - DAY_IN_LEDGE
 #[derive(Clone)]
 pub enum DataKey {
     LatestBlockHash,
+    BlockHeight,
     CollateralToken,
     WithdrawalAllowances(Address),
     Fees,
@@ -104,6 +105,7 @@ pub struct WithdrawalEvent {
 #[derive(Clone)]
 pub struct NewBlockEvent {
     pub new_block_hash: BytesN<32>,
+    pub new_block_height: u32,
     pub new_withdrawal_sum: i128,
     pub new_fees: i128,
 }
@@ -148,6 +150,7 @@ impl RollupContract {
     /// # Notes
     ///
     /// * The latest block hash is initialized to the zero hash.
+    /// * The block height is initialized to zero.
     /// * Fees and total withdrawable balances are initialized to zero.
     pub fn __constructor(env: Env, collateral_token: Address, owner: Address) {
         ownable::set_owner(&env, &owner);
@@ -162,6 +165,7 @@ impl RollupContract {
         env.storage()
             .instance()
             .set(&DataKey::TotalWithdrawable, &0i128);
+        env.storage().instance().set(&DataKey::BlockHeight, &0u32);
 
         extend_contract_ttl(&env);
     }
@@ -238,6 +242,8 @@ impl RollupContract {
     ///
     /// * Owner authorization is required.
     /// * Existing user allowances are incremented, not replaced.
+    /// * The block height is incremented by one and published in
+    ///   [`NewBlockEvent`], so committed blocks form a countable sequence.
     #[only_owner]
     pub fn rollup(
         env: Env,
@@ -324,8 +330,20 @@ impl RollupContract {
         env.storage()
             .instance()
             .set(&DataKey::LatestBlockHash, &new_block_hash);
+
+        // Numbers each committed block so the published history is countable.
+        // A re-posted `new_block_hash` carries a height that differs from the
+        // one it had originally, which the off-chain verifier detects.
+        let new_block_height = current_block_height(&env)
+            .checked_add(1)
+            .ok_or(ContractError::ArithmeticOverflow)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::BlockHeight, &new_block_height);
+
         env.events().publish_event(&NewBlockEvent {
             new_block_hash,
+            new_block_height,
             new_withdrawal_sum,
             new_fees,
         });
@@ -526,6 +544,14 @@ impl RollupContract {
             .unwrap()
     }
 
+    /// Returns the height of the latest committed rollup block.
+    ///
+    /// The constructor sets this to zero, and every [`Self::rollup`] increments
+    /// it by one, so the value counts the blocks committed so far.
+    pub fn block_height(env: Env) -> u32 {
+        current_block_height(&env)
+    }
+
     /// Returns the current withdrawal allowance for `user`.
     pub fn withdrawal_allowances(env: Env, user: Address) -> i128 {
         env.storage()
@@ -590,6 +616,17 @@ fn extend_contract_ttl(env: &Env) {
     env.storage()
         .instance()
         .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+}
+
+/// Reads the latest committed block height.
+///
+/// Falls back to zero so a contract upgraded from a version without
+/// [`DataKey::BlockHeight`] reads a defined value before its first rollup.
+fn current_block_height(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::BlockHeight)
+        .unwrap_or(0)
 }
 
 /// Adds two `i128` values and converts overflow into a contract error.

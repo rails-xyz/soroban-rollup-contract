@@ -49,6 +49,7 @@ The `RollupContract` manages deposits, withdrawals, and fee collection for a Lay
 ### Storage Keys (DataKey enum)
 
 - `LatestBlockHash`: Current rollup state root (BytesN<32>)
+- `BlockHeight`: Number of blocks committed so far (u32), incremented by each rollup
 - `CollateralToken`: Address of the token used for deposits/withdrawals
 - `WithdrawalAllowances(Address)`: Per-user withdrawal allowances (persistent storage)
 - `Fees`: Accumulated fees available for collection
