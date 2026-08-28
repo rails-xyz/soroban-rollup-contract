@@ -331,9 +331,6 @@ impl RollupContract {
             .instance()
             .set(&DataKey::LatestBlockHash, &new_block_hash);
 
-        // Numbers each committed block so the published history is countable.
-        // A re-posted `new_block_hash` carries a height that differs from the
-        // one it had originally, which the off-chain verifier detects.
         let new_block_height = current_block_height(&env)
             .checked_add(1)
             .ok_or(ContractError::ArithmeticOverflow)?;
