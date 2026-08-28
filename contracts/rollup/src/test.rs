@@ -1,12 +1,12 @@
 extern crate std;
 
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Events as _},
     token::{StellarAssetClient, TokenClient},
-    vec, Address, BytesN, Env,
+    vec, Address, BytesN, Env, Event as _,
 };
 
-use super::contract::{RollupContract, RollupContractClient};
+use super::contract::{NewBlockEvent, RecoveredEvent, RollupContract, RollupContractClient};
 
 fn create_token_contract<'a>(
     env: &Env,
@@ -60,6 +60,7 @@ fn test_deployment() {
     );
     assert_eq!(client.fees(), 0);
     assert_eq!(client.total_withdrawable(), 0);
+    assert_eq!(client.block_height(), 0);
 }
 
 #[test]
@@ -372,5 +373,105 @@ fn test_collateral_balance() {
 
     // Reported balance tracks the contract's token balance.
     assert_eq!(client.collateral_balance(), deposit_amount);
-    assert_eq!(client.collateral_balance(), token_client.balance(&client.address));
+    assert_eq!(
+        client.collateral_balance(),
+        token_client.balance(&client.address)
+    );
+}
+
+#[test]
+fn test_recover_emits_event() {
+    let env = Env::default();
+    let (_owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+
+    // A token other than the configured collateral token.
+    let other_admin = Address::generate(&env);
+    let (other_token, other_admin_client) = create_token_contract(&env, &other_admin);
+    other_admin_client.mint(&client.address, &1_000);
+
+    let recipient = Address::generate(&env);
+    client.recover(&other_token.address, &recipient, &400);
+
+    // Assert the event before any other contract call. A later invocation,
+    // including a read such as `balance`, clears the recorded event buffer.
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&client.address)
+            .events(),
+        [RecoveredEvent {
+            token: other_token.address.clone(),
+            to: recipient.clone(),
+            amount: 400,
+        }
+        .to_xdr(&env, &client.address)]
+    );
+    assert_eq!(other_token.balance(&recipient), 400);
+}
+
+#[test]
+fn test_rollup_numbers_each_committed_block() {
+    let env = Env::default();
+    let (_owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+
+    assert_eq!(client.block_height(), 0);
+
+    let first_root = BytesN::from_array(&env, &[1; 32]);
+    let second_root = BytesN::from_array(&env, &[2; 32]);
+
+    client.rollup(
+        &client.latest_block_hash(),
+        &first_root,
+        &vec![&env],
+        &vec![&env],
+        &0,
+        &0,
+    );
+    assert_eq!(client.block_height(), 1);
+
+    client.rollup(&first_root, &second_root, &vec![&env], &vec![&env], &0, &0);
+    assert_eq!(client.block_height(), 2);
+
+    // Re-posting an earlier root commits it at a height of its own, so the
+    // published history separates the re-post from the original commitment.
+    client.rollup(&second_root, &first_root, &vec![&env], &vec![&env], &0, &0);
+    assert_eq!(client.latest_block_hash(), first_root);
+    assert_eq!(client.block_height(), 3);
+}
+
+#[test]
+fn test_rollup_publishes_block_height() {
+    let env = Env::default();
+    let (_owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
+
+    // Fund the pool so the posted fee stays within the unreserved balance.
+    let deposit_amount = 10_0000000;
+    token_client.approve(&other_account, &client.address, &deposit_amount, &1000000);
+    client.deposit(&other_account, &deposit_amount);
+
+    let new_root = BytesN::from_array(&env, &[1; 32]);
+    client.rollup(
+        &client.latest_block_hash(),
+        &new_root,
+        &vec![&env],
+        &vec![&env],
+        &0,
+        &7,
+    );
+
+    // Assert the event before any other contract call. A later invocation,
+    // including a read such as `block_height`, clears the recorded event buffer.
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&client.address)
+            .events(),
+        [NewBlockEvent {
+            new_block_hash: new_root.clone(),
+            new_block_height: 1,
+            new_withdrawal_sum: 0,
+            new_fees: 7,
+        }
+        .to_xdr(&env, &client.address)]
+    );
 }

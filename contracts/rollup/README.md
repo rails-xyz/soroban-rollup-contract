@@ -30,7 +30,7 @@ The `RollupContract` provides:
 | `accept_ownership()`                         | Proposed owner | Completes the two-step ownership transfer.                                                    |
 | `renounce_ownership()`                       | _None_        | Always fails with `RenounceOwnershipDisabled`.                                                 |
 
-Read-only functions: `owner`, `latest_block_hash`, `withdrawal_allowances(user)`, `fees`, `total_withdrawable`, and `collateral_balance`.
+Read-only functions: `owner`, `latest_block_hash`, `block_height`, `withdrawal_allowances(user)`, `fees`, `total_withdrawable`, and `collateral_balance`.
 
 ### Rollup Constraints
 
@@ -50,6 +50,7 @@ Existing user allowances are incremented, not replaced. All balance arithmetic i
 Instance storage:
 
 - `LatestBlockHash`: Current rollup state root (`BytesN<32>`).
+- `BlockHeight`: Number of blocks committed so far (`u32`). Each `rollup` increments it, and `NewBlockEvent` publishes it.
 - `CollateralToken`: Address of the token used for deposits, withdrawals, and fees.
 - `Fees`: Accrued fees available for collection.
 - `TotalWithdrawable`: Total reserved for user withdrawals plus accrued fees.
@@ -106,9 +107,10 @@ cargo test --package rollup-contract test_deposit
 cargo check
 
 # Generate Rust bindings
+# `>|` overwrites the existing file also when the shell sets `noclobber`.
 stellar contract bindings rust \
   --wasm ./target/wasm32v1-none/release/rollup_contract.wasm \
-  --out ./bindings/rollup_contract.rs
+>| bindings/rollup_contract.rs
 ```
 
 `contracts/rollup/Makefile` wraps the common targets: `make build`, `make test`, `make fmt`, and `make clean`.
