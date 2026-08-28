@@ -68,6 +68,9 @@ contracts/rollup
 ├── src
 │   ├── lib.rs      # Module declarations
 │   ├── contract.rs # Contract implementation
+│   ├── certora     # Formal specification rules (feature `certora`)
+│   │   ├── mod.rs
+│   │   └── spec.rs
 │   └── test.rs     # Unit tests
 ├── test_snapshots  # Generated test ledger snapshots
 ├── Cargo.toml
@@ -115,6 +118,39 @@ stellar contract bindings rust \
 
 `contracts/rollup/Makefile` wraps the common targets: `make build`, `make test`, `make fmt`, and `make clean`.
 
+## Formal Verification (Certora)
+
+The crate carries formal specification rules for the Certora Prover behind the `certora` feature flag. The rules live in [spec.rs](./src/certora/spec.rs) and cover the input validation and authorization constraints of `deposit`, `rollup`, `withdraw`, `collect_fees`, `recover`, and `renounce_ownership`.
+
+The Sunbeam scaffolding lives at the repository root: the build script [certora_build_rollup_contract.py](../../certora_build_rollup_contract.py) and the job configuration [certora/rollup_contract.conf](../../certora/rollup_contract.conf). Run the prover from the repository root:
+
+```bash
+# Activate the local Python environment so certoraSorobanProver is on PATH
+source .venv/bin/activate
+
+# Run a local compilation-only check
+cd certora
+certoraSorobanProver rollup_contract.conf --compilation_steps_only --short_output
+
+# Run the full prover job after setting CERTORAKEY
+certoraSorobanProver rollup_contract.conf
+```
+
+To compile the instrumented contract without the prover:
+
+```bash
+SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 \
+RUSTFLAGS='-C link-arg=--allow-undefined' \
+cargo build --target wasm32v1-none --release --package rollup-contract --features certora
+```
+
+Notes:
+
+- The build script targets the Soroban artifact at `target/wasm32v1-none/release/rollup_contract.wasm`. Each rule is exported from that Wasm under its own name, and `certora/rollup_contract.conf` lists the rules to verify.
+- The build script declares `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2`, because soroban-sdk 26 blocks a plain `cargo build` without it. The variable only affects contract-spec metadata, not the verified code.
+- A workspace-local Cargo config in `.cargo/config.toml` disables a global GitHub HTTPS-to-SSH rewrite so public Certora dependencies can be fetched reliably.
+- To skip the virtualenv activation, run `../.venv/bin/certoraSorobanProver` from the `certora/` directory instead.
+
 ## Environment Setup
 
 A TESTNET Stellar node is live on staging. Add it as a network configuration for the stellar CLI:
@@ -141,5 +177,6 @@ stellar contract deploy \
 - `stellar-access`: Provides the `ownable` module for access control.
 - `stellar-contract-utils`: Provides the `Upgradeable` trait and the `upgrade` helper that `upgrade` calls.
 - `stellar-macros`: Procedural macros, including the `#[only_owner]` macro.
+- `cvlr`, `cvlr-soroban`, `cvlr-soroban-derive`: Certora verification harness. Optional, enabled by the `certora` feature.
 
 Collateral transfers use `soroban_sdk::token::TokenClient`. The `stellar-tokens` entry in `Cargo.toml` is not referenced by the contract source.
