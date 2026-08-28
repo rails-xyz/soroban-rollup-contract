@@ -1,12 +1,12 @@
 extern crate std;
 
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Events as _},
     token::{StellarAssetClient, TokenClient},
-    vec, Address, BytesN, Env,
+    vec, Address, BytesN, Env, Event as _,
 };
 
-use super::contract::{RollupContract, RollupContractClient};
+use super::contract::{RecoveredEvent, RollupContract, RollupContractClient};
 
 fn create_token_contract<'a>(
     env: &Env,
@@ -372,5 +372,38 @@ fn test_collateral_balance() {
 
     // Reported balance tracks the contract's token balance.
     assert_eq!(client.collateral_balance(), deposit_amount);
-    assert_eq!(client.collateral_balance(), token_client.balance(&client.address));
+    assert_eq!(
+        client.collateral_balance(),
+        token_client.balance(&client.address)
+    );
+}
+
+#[test]
+fn test_recover_emits_event() {
+    let env = Env::default();
+    let (_owner, _other_account, _fee_account, _token_client, client) = deploy_fixture(&env);
+
+    // A token other than the configured collateral token.
+    let other_admin = Address::generate(&env);
+    let (other_token, other_admin_client) = create_token_contract(&env, &other_admin);
+    other_admin_client.mint(&client.address, &1_000);
+
+    let recipient = Address::generate(&env);
+    client.recover(&other_token.address, &recipient, &400);
+
+    // Assert the event before any other contract call. A later invocation,
+    // including a read such as `balance`, clears the recorded event buffer.
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&client.address)
+            .events(),
+        [RecoveredEvent {
+            token: other_token.address.clone(),
+            to: recipient.clone(),
+            amount: 400,
+        }
+        .to_xdr(&env, &client.address)]
+    );
+    assert_eq!(other_token.balance(&recipient), 400);
 }

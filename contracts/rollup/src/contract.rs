@@ -116,6 +116,23 @@ pub struct FeesCollectedEvent {
     pub amount: i128,
 }
 
+/// Event emitted when a non-collateral token is recovered from the contract.
+#[contractevent]
+#[derive(Clone)]
+pub struct RecoveredEvent {
+    pub token: Address,
+    pub to: Address,
+    pub amount: i128,
+}
+
+/// Event emitted when the contract Wasm is replaced.
+#[contractevent]
+#[derive(Clone)]
+pub struct UpgradedEvent {
+    pub operator: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
 #[contractimpl]
 impl RollupContract {
     /// Initializes the rollup contract.
@@ -451,6 +468,11 @@ impl RollupContract {
         extend_contract_ttl(&env);
         let token_client = soroban_sdk::token::TokenClient::new(&env, &token_address);
         token_client.transfer(&env.current_contract_address(), &to, &amount);
+        env.events().publish_event(&RecoveredEvent {
+            token: token_address,
+            to,
+            amount,
+        });
         Ok(())
     }
 
@@ -550,6 +572,10 @@ impl Upgradeable for RollupContract {
         }
 
         upgradeable::upgrade(e, &new_wasm_hash);
+        e.events().publish_event(&UpgradedEvent {
+            operator,
+            new_wasm_hash,
+        });
     }
 }
 
