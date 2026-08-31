@@ -10,15 +10,20 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR
 COMMAND = (
+    # soroban-sdk 26 enables the `experimental_spec_shaking_v2` feature through
+    # the stellar-* dependencies and refuses to build unless the build system
+    # declares support for it. Certora builds with plain cargo, so declare it
+    # here. It only affects contract-spec metadata, not the verified code.
+    "SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 "
     "RUSTFLAGS='-C link-arg=--allow-undefined' "
-    "cargo build --target wasm32v1-none --release -p managed-liquidity-vault --features certora"
+    "cargo build --target wasm32v1-none --release -p rollup-contract --features certora"
 )
 SOURCES = [
     "Cargo.toml",
-    "contracts/managed_liquidity_vault/Cargo.toml",
-    "contracts/managed_liquidity_vault/src/**/*.rs",
+    "contracts/rollup/Cargo.toml",
+    "contracts/rollup/src/**/*.rs",
 ]
-EXECUTABLES = "target/wasm32v1-none/release/managed_liquidity_vault.wasm"
+EXECUTABLES = "target/wasm32v1-none/release/rollup_contract.wasm"
 VERBOSE = False
 
 
@@ -63,7 +68,7 @@ def write_output(output_data, output_file=None) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compile the Soroban project and emit Certora build metadata."
+        description="Compile the rollup contract and emit Certora build metadata."
     )
     parser.add_argument("-o", "--output", metavar="FILE", help="Write JSON output to a file.")
     parser.add_argument("--json", action="store_true", help="Print JSON output to stdout.")

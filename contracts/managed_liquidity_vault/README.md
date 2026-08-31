@@ -135,10 +135,12 @@ The codebase includes formal specification rules for the Certora Prover under th
 To compile the contract with Certora instrumentation:
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release --features certora
+SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 \
+RUSTFLAGS='-C link-arg=--allow-undefined' \
+cargo build --target wasm32v1-none --release --package managed-liquidity-vault --features certora
 ```
 
-The Sunbeam scaffolding lives in `certora/` at the repository root and in [src/certora](./src/certora). Run the prover from the repository root:
+The Sunbeam scaffolding lives at the repository root: the build script [certora_build_managed_liquidity_vault.py](../../certora_build_managed_liquidity_vault.py) and the job configuration [certora/managed_liquidity_vault.conf](../../certora/managed_liquidity_vault.conf). The rules themselves live in [src/certora](./src/certora). Run the prover from the repository root:
 
 ```bash
 # Activate the local Python environment so certoraSorobanProver is on PATH
@@ -155,6 +157,7 @@ certoraSorobanProver managed_liquidity_vault.conf
 Notes:
 
 - The build script targets the Soroban artifact at `target/wasm32v1-none/release/managed_liquidity_vault.wasm`.
+- The build script declares `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2`, because soroban-sdk 26 blocks a plain `cargo build` without it. The variable only affects contract-spec metadata, not the verified code.
 - A workspace-local Cargo config in `.cargo/config.toml` disables a global GitHub HTTPS-to-SSH rewrite so public Certora dependencies can be fetched reliably.
 - To skip the virtualenv activation, run `../.venv/bin/certoraSorobanProver` from the `certora/` directory instead.
 

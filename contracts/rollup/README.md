@@ -68,6 +68,9 @@ contracts/rollup
 ├── src
 │   ├── lib.rs      # Module declarations
 │   ├── contract.rs # Contract implementation
+│   ├── certora     # Formal specification rules (feature `certora`)
+│   │   ├── mod.rs
+│   │   └── spec.rs
 │   └── test.rs     # Unit tests
 ├── test_snapshots  # Generated test ledger snapshots
 ├── Cargo.toml
@@ -115,6 +118,52 @@ stellar contract bindings rust \
 
 `contracts/rollup/Makefile` wraps the common targets: `make build`, `make test`, `make fmt`, and `make clean`.
 
+## Formal Verification (Certora)
+
+The crate carries formal specification rules for the Certora Prover behind the `certora` feature flag. The rules live in [spec.rs](./src/certora/spec.rs). The prover verifies all of them:
+
+| Rule | Property |
+| :--- | :--- |
+| `sanity` | The contract state is reachable. |
+| `deposit_rejects_non_positive_amount` | A deposit of a non-positive amount returns `DepositAmountMustBePositive`. |
+| `rollup_rejects_negative_fees` | A rollup with negative fees returns `FeesMustBeNonNegative`. |
+| `withdraw_clears_allowance` | A successful withdrawal leaves no allowance for the user. |
+| `collect_fees_clears_balance` | A successful fee collection leaves no accrued fees. |
+| `recover_rejects_non_positive_amount` | A recovery of a non-positive amount never transfers. |
+| `renounce_ownership_always_rejected` | Ownership renunciation always returns `RenounceOwnershipDisabled`. |
+
+Two limits shape that set, and [spec.rs](./src/certora/spec.rs) documents both. The prover treats the comparison of two `Address` or `BytesN` objects as uninterpreted, so the block-hash guards of `rollup` and the collateral-token guard of `recover` stay covered by the unit tests. A collateral transfer is a call into the token contract, and the prover does not converge on a rule that puts one on the path to the property, so each rule asserts a property that a single call establishes.
+
+The Sunbeam scaffolding lives at the repository root: the build script [certora_build_rollup_contract.py](../../certora_build_rollup_contract.py) and the job configuration [certora/rollup_contract.conf](../../certora/rollup_contract.conf). Run the prover from the repository root:
+
+```bash
+# Activate the local Python environment so certoraSorobanProver is on PATH
+source .venv/bin/activate
+
+# Run a local compilation-only check
+cd certora
+certoraSorobanProver rollup_contract.conf --compilation_steps_only --short_output
+
+# Run the full prover job after setting CERTORAKEY
+certoraSorobanProver rollup_contract.conf
+```
+
+To compile the instrumented contract without the prover:
+
+```bash
+SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=1 \
+RUSTFLAGS='-C link-arg=--allow-undefined' \
+cargo build --target wasm32v1-none --release --package rollup-contract --features certora
+```
+
+Notes:
+
+- The build script targets the Soroban artifact at `target/wasm32v1-none/release/rollup_contract.wasm`. Each rule is exported from that Wasm under its own name, and `certora/rollup_contract.conf` lists the rules to verify.
+- The configuration sets `optimistic_loop`. Storage access converts a `DataKey` through `Val`, and the prover reads the length of the vector behind that conversion as a symbolic value, so no finite `loop_iter` closes the loop. No rule reasons about loop behaviour: the rules post empty withdrawal vectors, which leaves the withdrawal loop of `rollup` unreachable.
+- The build script declares `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2`, because soroban-sdk 26 blocks a plain `cargo build` without it. The variable only affects contract-spec metadata, not the verified code.
+- A workspace-local Cargo config in `.cargo/config.toml` disables a global GitHub HTTPS-to-SSH rewrite so public Certora dependencies can be fetched reliably.
+- To skip the virtualenv activation, run `../.venv/bin/certoraSorobanProver` from the `certora/` directory instead.
+
 ## Environment Setup
 
 A TESTNET Stellar node is live on staging. Add it as a network configuration for the stellar CLI:
@@ -141,5 +190,6 @@ stellar contract deploy \
 - `stellar-access`: Provides the `ownable` module for access control.
 - `stellar-contract-utils`: Provides the `Upgradeable` trait and the `upgrade` helper that `upgrade` calls.
 - `stellar-macros`: Procedural macros, including the `#[only_owner]` macro.
+- `cvlr`, `cvlr-soroban`, `cvlr-soroban-derive`: Certora verification harness. Optional, enabled by the `certora` feature.
 
 Collateral transfers use `soroban_sdk::token::TokenClient`. The `stellar-tokens` entry in `Cargo.toml` is not referenced by the contract source.
