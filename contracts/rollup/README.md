@@ -1,6 +1,6 @@
 # Rollup Contract
 
-A Soroban smart contract that holds the collateral pool for a rollup on the Stellar network. The pool backs user deposits, owner-posted withdrawal allowances, and owner-accrued protocol fees.
+A Soroban smart contract that holds the collateral pool for a rollup on the Stellar network. The pool backs user deposits, owner-posted withdrawal allowances, and owner-accrued fees.
 
 The owner advances the rollup state by posting a new block hash together with the newly withdrawable balances and fees. Users then withdraw their allowance directly from the collateral pool.
 
