@@ -61,6 +61,7 @@ pub enum ContractError {
     InsufficientBalance = 17,
     WithdrawalAmountMustBeNonNegative = 18,
     FeesMustBeNonNegative = 19,
+    WithdrawalAddressIsContract = 20,
 
     // Withdrawal errors: 31-40
     NoWithdrawalAllowance = 31,
@@ -75,6 +76,7 @@ pub enum ContractError {
     // Ownership errors: 61-70
     RenounceOwnershipDisabled = 61,
     Unauthorized = 62,
+    OwnerIsContract = 63,
 
     // Arithmetic errors: 71-80
     ArithmeticOverflow = 71,
@@ -147,12 +149,20 @@ impl RollupContract {
     /// * `owner` - Upgrade and admin authority for rollup updates and fee
     ///   collection.
     ///
+    /// # Errors
+    ///
+    /// * [`ContractError::OwnerIsContract`] - If `owner` is the address of
+    ///   this contract.
+    ///
     /// # Notes
     ///
     /// * The latest block hash is initialized to the zero hash.
     /// * The block height is initialized to zero.
     /// * Fees and total withdrawable balances are initialized to zero.
     pub fn __constructor(env: Env, collateral_token: Address, owner: Address) {
+        if owner == env.current_contract_address() {
+            panic_with_error!(&env, ContractError::OwnerIsContract);
+        }
         ownable::set_owner(&env, &owner);
         env.storage().instance().set(
             &DataKey::LatestBlockHash,
@@ -235,6 +245,8 @@ impl RollupContract {
     /// * [`ContractError::FeesMustBeNonNegative`] - If `new_fees < 0`.
     /// * [`ContractError::WithdrawalAmountMustBeNonNegative`] - If any entry in
     ///   `new_withdrawal_amounts` is negative.
+    /// * [`ContractError::WithdrawalAddressIsContract`] - If any entry in
+    ///   `new_withdrawal_addresses` is the address of this contract.
     /// * [`ContractError::ArithmeticOverflow`] - If any balance, fee, or
     ///   allowance accumulation overflows.
     ///
@@ -279,9 +291,13 @@ impl RollupContract {
             return Err(ContractError::ArrayLengthExceedsLimit);
         }
 
+        let contract_address = env.current_contract_address();
         let mut calculated_withdrawal_sum = 0i128;
         for i in 0..new_withdrawal_addresses.len() {
             let user = &new_withdrawal_addresses.get(i).unwrap();
+            if *user == contract_address {
+                return Err(ContractError::WithdrawalAddressIsContract);
+            }
             let allowance = new_withdrawal_amounts.get(i).unwrap();
             if allowance < 0 {
                 return Err(ContractError::WithdrawalAmountMustBeNonNegative);
