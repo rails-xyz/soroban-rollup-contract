@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/rollup_contract.wasm", sha256 =
-    "2387c3250c25d268e5fb367bea51be61471f2c391fcd5e6ba4acb16461731dee"
+    "14e4e40a50ecb7b3393573f1f17413198d4e8465e8d7a948dca0880895fb0322"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -71,12 +71,14 @@ pub enum ContractError {
     InsufficientBalance = 17,
     WithdrawalAmountMustBeNonNegative = 18,
     FeesMustBeNonNegative = 19,
+    WithdrawalAddressIsContract = 20,
     NoWithdrawalAllowance = 31,
     NoFeesToCollect = 41,
     CannotRecoverCollateral = 51,
     RecoverAmountMustBePositive = 52,
     RenounceOwnershipDisabled = 61,
     Unauthorized = 62,
+    OwnerIsContract = 63,
     ArithmeticOverflow = 71,
 }
 #[soroban_sdk::contracterror]
