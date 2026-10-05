@@ -19,7 +19,7 @@ The `RollupContract` provides:
 
 | Function                                     | Authorization | Description                                                                                    |
 | :------------------------------------------- | :------------ | :--------------------------------------------------------------------------------------------- |
-| `__constructor(collateral_token, owner)`     | _None_        | Sets the collateral token and owner. Initializes the block hash to zero, fees and totals to 0. |
+| `__constructor(collateral_token, owner)`     | _None_        | Sets the collateral token and owner. Initializes the block hash to zero, fees and totals to 0. Rejects the contract's own address as `owner`. |
 | `deposit(user, amount)`                      | `user`        | Transfers `amount` of collateral token from `user` into the contract.                          |
 | `rollup(old_block_hash, new_block_hash, …)`  | Owner         | Commits a new block hash and adds withdrawal allowances and fees.                              |
 | `withdraw(user)`                             | `user`        | Transfers the full stored allowance to `user` and clears the entry.                            |
@@ -40,6 +40,7 @@ Read-only functions: `owner`, `latest_block_hash`, `block_height`, `withdrawal_a
 - `old_block_hash` matches the currently stored block hash.
 - The address and amount arrays have equal length, and hold at most 100 entries.
 - Every posted amount is non-negative, and `new_fees` is non-negative.
+- No withdrawal address is the rollup contract's own address.
 - The posted amounts add up to `new_withdrawal_sum`.
 - The unreserved collateral balance covers `new_withdrawal_sum + new_fees`.
 

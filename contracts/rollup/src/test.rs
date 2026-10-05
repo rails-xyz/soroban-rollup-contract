@@ -6,7 +6,9 @@ use soroban_sdk::{
     vec, Address, BytesN, Env, Event as _,
 };
 
-use super::contract::{NewBlockEvent, RecoveredEvent, RollupContract, RollupContractClient};
+use super::contract::{
+    ContractError, NewBlockEvent, RecoveredEvent, RollupContract, RollupContractClient,
+};
 
 fn create_token_contract<'a>(
     env: &Env,
@@ -115,6 +117,50 @@ fn test_rollup() {
     let allowance = client.withdrawal_allowances(&other_account);
     assert_eq!(allowance, withdrawal_amount);
     assert_eq!(client.fees(), fee_amount);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #63)")]
+fn test_constructor_rejects_contract_as_owner() {
+    let env = Env::default();
+    let token_admin = Address::generate(&env);
+    let (token_client, _token_admin_client) = create_token_contract(&env, &token_admin);
+
+    let contract_id = Address::generate(&env);
+    env.register_at(
+        &contract_id,
+        RollupContract,
+        (&token_client.address, &contract_id),
+    );
+}
+
+#[test]
+fn test_rollup_rejects_contract_as_withdrawal_address() {
+    let env = Env::default();
+    let (_owner, other_account, _fee_account, token_client, client) = deploy_fixture(&env);
+
+    let deposit_amount = 10_0000000;
+    token_client.approve(&other_account, &client.address, &deposit_amount, &1000000);
+    client.deposit(&other_account, &deposit_amount);
+
+    let old_root = client.latest_block_hash();
+    let new_root = BytesN::from_array(&env, &[1; 32]);
+
+    // The valid first entry must not be credited when a later entry is rejected.
+    let result = client.try_rollup(
+        &old_root,
+        &new_root,
+        &vec![&env, other_account.clone(), client.address.clone()],
+        &vec![&env, 1_0000000, 2_0000000],
+        &3_0000000,
+        &0,
+    );
+
+    assert_eq!(result, Err(Ok(ContractError::WithdrawalAddressIsContract)));
+    assert_eq!(client.withdrawal_allowances(&other_account), 0);
+    assert_eq!(client.withdrawal_allowances(&client.address), 0);
+    assert_eq!(client.total_withdrawable(), 0);
+    assert_eq!(client.latest_block_hash(), old_root);
 }
 
 #[test]
