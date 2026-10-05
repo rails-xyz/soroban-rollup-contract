@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/rollup_contract.wasm", sha256 =
-    "14e4e40a50ecb7b3393573f1f17413198d4e8465e8d7a948dca0880895fb0322"
+    "6b04fca8faa512e9ddeb29d9dd8caa80886e3fc29ae8f98525fa195c9d997af8"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]

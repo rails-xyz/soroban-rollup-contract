@@ -7,7 +7,7 @@ use soroban_sdk::{
 };
 
 use super::contract::{
-    ContractError, NewBlockEvent, RecoveredEvent, RollupContract, RollupContractClient,
+    ContractError, DataKey, NewBlockEvent, RecoveredEvent, RollupContract, RollupContractClient,
 };
 
 fn create_token_contract<'a>(
@@ -117,6 +117,53 @@ fn test_rollup() {
     let allowance = client.withdrawal_allowances(&other_account);
     assert_eq!(allowance, withdrawal_amount);
     assert_eq!(client.fees(), fee_amount);
+}
+
+#[test]
+fn test_rollup_zero_credit_creates_no_entry_and_keeps_existing_allowance() {
+    let env = Env::default();
+    let (_owner, other_account, fee_account, token_client, client) = deploy_fixture(&env);
+
+    let deposit_amount = 10_0000000;
+    token_client.approve(&other_account, &client.address, &deposit_amount, &1000000);
+    client.deposit(&other_account, &deposit_amount);
+
+    let has_entry = |user: &Address| {
+        env.as_contract(&client.address, || {
+            env.storage()
+                .persistent()
+                .has(&DataKey::WithdrawalAllowances(user.clone()))
+        })
+    };
+
+    // First block: credit other_account, and a zero credit to fee_account.
+    let first_root = BytesN::from_array(&env, &[1; 32]);
+    client.rollup(
+        &client.latest_block_hash(),
+        &first_root,
+        &vec![&env, other_account.clone(), fee_account.clone()],
+        &vec![&env, 5_0000000, 0],
+        &5_0000000,
+        &0,
+    );
+    assert!(!has_entry(&fee_account));
+    assert_eq!(client.withdrawal_allowances(&fee_account), 0);
+
+    // Second block: a zero credit keeps the existing allowance withdrawable.
+    let second_root = BytesN::from_array(&env, &[2; 32]);
+    client.rollup(
+        &first_root,
+        &second_root,
+        &vec![&env, other_account.clone()],
+        &vec![&env, 0],
+        &0,
+        &0,
+    );
+    assert!(has_entry(&other_account));
+    assert_eq!(client.withdrawal_allowances(&other_account), 5_0000000);
+
+    client.withdraw(&other_account);
+    assert_eq!(token_client.balance(&other_account), 15_0000000);
 }
 
 #[test]

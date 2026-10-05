@@ -254,6 +254,8 @@ impl RollupContract {
     ///
     /// * Owner authorization is required.
     /// * Existing user allowances are incremented, not replaced.
+    /// * A zero credit to an address without an allowance creates no storage
+    ///   entry. A zero credit to an existing allowance extends its TTL.
     /// * The block height is incremented by one and published in
     ///   [`NewBlockEvent`], so committed blocks form a countable sequence.
     #[only_owner]
@@ -304,14 +306,17 @@ impl RollupContract {
             }
             let key = DataKey::WithdrawalAllowances(user.clone());
             let current = env.storage().persistent().get(&key).unwrap_or(0i128);
-            env.storage()
-                .persistent()
-                .set(&key, &checked_add(current, allowance)?);
-            env.storage().persistent().extend_ttl(
-                &key,
-                PERSISTENT_LIFETIME_THRESHOLD,
-                PERSISTENT_BUMP_AMOUNT,
-            );
+            let updated = checked_add(current, allowance)?;
+            if updated > 0 {
+                if allowance > 0 {
+                    env.storage().persistent().set(&key, &updated);
+                }
+                env.storage().persistent().extend_ttl(
+                    &key,
+                    PERSISTENT_LIFETIME_THRESHOLD,
+                    PERSISTENT_BUMP_AMOUNT,
+                );
+            }
             calculated_withdrawal_sum = checked_add(calculated_withdrawal_sum, allowance)?;
         }
         if calculated_withdrawal_sum != new_withdrawal_sum {
