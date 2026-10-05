@@ -16,7 +16,7 @@
 //! not converge on a rule that puts one on the path to the property. Each rule
 //! below therefore asserts a property that a single call establishes.
 
-use crate::contract::{ContractError, RollupContract};
+use crate::contract::{ContractError, RollupContract, WithdrawalCredit};
 use cvlr::asserts::{cvlr_assert, cvlr_assume, cvlr_satisfy};
 use cvlr_soroban_derive::rule;
 use soroban_sdk::{Address, BytesN, Env, Vec};
@@ -26,18 +26,16 @@ fn zero_hash(env: &Env) -> BytesN<32> {
     BytesN::from_array(env, &[0; 32])
 }
 
-/// Returns the empty withdrawal vectors the `rollup` rules post.
+/// Returns the empty withdrawal credit vector the `rollup` rules post.
 ///
 /// The prover reads the length of a vector as a symbolic host value, so it
 /// unrolls the withdrawal loop of `rollup` and reports an unwinding condition
-/// unless the length is pinned. The vectors are empty by construction, so the
+/// unless the length is pinned. The vector is empty by construction, so the
 /// assumption adds no unsoundness and leaves the loop body unreachable.
-fn empty_withdrawals(env: &Env) -> (Vec<Address>, Vec<i128>) {
-    let addresses: Vec<Address> = Vec::new(env);
-    let amounts: Vec<i128> = Vec::new(env);
-    cvlr_assume!(addresses.is_empty());
-    cvlr_assume!(amounts.is_empty());
-    (addresses, amounts)
+fn empty_withdrawals(env: &Env) -> Vec<WithdrawalCredit> {
+    let credits: Vec<WithdrawalCredit> = Vec::new(env);
+    cvlr_assume!(credits.is_empty());
+    credits
 }
 
 #[rule]
@@ -58,13 +56,12 @@ fn deposit_rejects_non_positive_amount(env: Env, user: Address, amount: i128) {
 #[rule]
 fn rollup_rejects_negative_fees(env: Env, new_withdrawal_sum: i128, new_fees: i128) {
     if new_fees < 0 {
-        let (addresses, amounts) = empty_withdrawals(&env);
+        let credits = empty_withdrawals(&env);
         let result = RollupContract::rollup(
             env.clone(),
             zero_hash(&env),
             zero_hash(&env),
-            addresses,
-            amounts,
+            credits,
             new_withdrawal_sum,
             new_fees,
         );

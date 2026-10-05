@@ -8,7 +8,15 @@ use soroban_sdk::{
 
 use super::contract::{
     ContractError, DataKey, NewBlockEvent, RecoveredEvent, RollupContract, RollupContractClient,
+    WithdrawalCredit,
 };
+
+fn credit(recipient: &Address, amount: i128) -> WithdrawalCredit {
+    WithdrawalCredit {
+        recipient: recipient.clone(),
+        amount,
+    }
+}
 
 fn create_token_contract<'a>(
     env: &Env,
@@ -108,8 +116,7 @@ fn test_rollup() {
     client.rollup(
         &old_root,
         &new_root,
-        &vec![&env, other_account.clone()],
-        &vec![&env, withdrawal_amount],
+        &vec![&env, credit(&other_account, withdrawal_amount)],
         &withdrawal_amount,
         &fee_amount,
     );
@@ -141,8 +148,11 @@ fn test_rollup_zero_credit_creates_no_entry_and_keeps_existing_allowance() {
     client.rollup(
         &client.latest_block_hash(),
         &first_root,
-        &vec![&env, other_account.clone(), fee_account.clone()],
-        &vec![&env, 5_0000000, 0],
+        &vec![
+            &env,
+            credit(&other_account, 5_0000000),
+            credit(&fee_account, 0),
+        ],
         &5_0000000,
         &0,
     );
@@ -154,8 +164,7 @@ fn test_rollup_zero_credit_creates_no_entry_and_keeps_existing_allowance() {
     client.rollup(
         &first_root,
         &second_root,
-        &vec![&env, other_account.clone()],
-        &vec![&env, 0],
+        &vec![&env, credit(&other_account, 0)],
         &0,
         &0,
     );
@@ -197,8 +206,11 @@ fn test_rollup_rejects_contract_as_withdrawal_address() {
     let result = client.try_rollup(
         &old_root,
         &new_root,
-        &vec![&env, other_account.clone(), client.address.clone()],
-        &vec![&env, 1_0000000, 2_0000000],
+        &vec![
+            &env,
+            credit(&other_account, 1_0000000),
+            credit(&client.address, 2_0000000),
+        ],
         &3_0000000,
         &0,
     );
@@ -227,7 +239,7 @@ fn test_rollup_non_owner() {
     let new_root = BytesN::from_array(&env, &[1; 32]);
 
     // This should fail auth - no mock_all_auths called, so owner auth will fail
-    client.rollup(&old_root, &new_root, &vec![&env], &vec![&env], &0, &0);
+    client.rollup(&old_root, &new_root, &vec![&env], &0, &0);
 }
 
 #[test]
@@ -248,8 +260,7 @@ fn test_withdraw() {
     client.rollup(
         &old_root,
         &new_root,
-        &vec![&env, other_account.clone()],
-        &vec![&env, withdrawal_amount],
+        &vec![&env, credit(&other_account, withdrawal_amount)],
         &withdrawal_amount,
         &fee_amount,
     );
@@ -275,14 +286,7 @@ fn test_collect_fees() {
     let old_root = client.latest_block_hash();
     let new_root = BytesN::from_array(&env, &[1; 32]);
 
-    client.rollup(
-        &old_root,
-        &new_root,
-        &vec![&env],
-        &vec![&env],
-        &0,
-        &fee_amount,
-    );
+    client.rollup(&old_root, &new_root, &vec![&env], &0, &fee_amount);
 
     let initial_balance = token_client.balance(&fee_account);
     client.collect_fees(&fee_account);
@@ -309,8 +313,7 @@ fn test_withdraw_verifies_auth() {
     client.rollup(
         &old_root,
         &new_root,
-        &vec![&env, other_account.clone()],
-        &vec![&env, withdrawal_amount],
+        &vec![&env, credit(&other_account, withdrawal_amount)],
         &withdrawal_amount,
         &0,
     );
@@ -516,18 +519,17 @@ fn test_rollup_numbers_each_committed_block() {
         &client.latest_block_hash(),
         &first_root,
         &vec![&env],
-        &vec![&env],
         &0,
         &0,
     );
     assert_eq!(client.block_height(), 1);
 
-    client.rollup(&first_root, &second_root, &vec![&env], &vec![&env], &0, &0);
+    client.rollup(&first_root, &second_root, &vec![&env], &0, &0);
     assert_eq!(client.block_height(), 2);
 
     // Re-posting an earlier root commits it at a height of its own, so the
     // published history separates the re-post from the original commitment.
-    client.rollup(&second_root, &first_root, &vec![&env], &vec![&env], &0, &0);
+    client.rollup(&second_root, &first_root, &vec![&env], &0, &0);
     assert_eq!(client.latest_block_hash(), first_root);
     assert_eq!(client.block_height(), 3);
 }
@@ -543,14 +545,7 @@ fn test_rollup_publishes_block_height() {
     client.deposit(&other_account, &deposit_amount);
 
     let new_root = BytesN::from_array(&env, &[1; 32]);
-    client.rollup(
-        &client.latest_block_hash(),
-        &new_root,
-        &vec![&env],
-        &vec![&env],
-        &0,
-        &7,
-    );
+    client.rollup(&client.latest_block_hash(), &new_root, &vec![&env], &0, &7);
 
     // Assert the event before any other contract call. A later invocation,
     // including a read such as `block_height`, clears the recorded event buffer.
