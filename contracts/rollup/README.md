@@ -44,7 +44,7 @@ Read-only functions: `owner`, `latest_block_hash`, `block_height`, `withdrawal_a
 - The posted amounts add up to `new_withdrawal_sum`.
 - The unreserved collateral balance covers `new_withdrawal_sum + new_fees`.
 
-Existing user allowances are incremented, not replaced. All balance arithmetic is checked and fails with `ArithmeticOverflow` instead of wrapping.
+Existing user allowances are incremented, not replaced. A zero credit to an address without an allowance creates no storage entry. A zero credit to an existing allowance extends its TTL. All balance arithmetic is checked and fails with `ArithmeticOverflow` instead of wrapping.
 
 ## State
 
