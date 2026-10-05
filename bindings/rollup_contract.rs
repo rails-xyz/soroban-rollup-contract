@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/rollup_contract.wasm", sha256 =
-    "6b04fca8faa512e9ddeb29d9dd8caa80886e3fc29ae8f98525fa195c9d997af8"
+    "64d4551dcd3dfe17e0bd5021bc2ce99c353d50689d44768b97eb25a59046dae4"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -11,8 +11,7 @@ pub trait Contract {
         env: soroban_sdk::Env,
         old_block_hash: soroban_sdk::BytesN<32>,
         new_block_hash: soroban_sdk::BytesN<32>,
-        new_withdrawal_addresses: soroban_sdk::Vec<soroban_sdk::Address>,
-        new_withdrawal_amounts: soroban_sdk::Vec<i128>,
+        new_withdrawal_credits: soroban_sdk::Vec<WithdrawalCredit>,
         new_withdrawal_sum: i128,
         new_fees: i128,
     ) -> Result<(), ContractError>;
@@ -58,6 +57,12 @@ pub trait Contract {
     );
     fn withdrawal_allowances(env: soroban_sdk::Env, user: soroban_sdk::Address) -> i128;
 }
+#[soroban_sdk::contracttype]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+pub struct WithdrawalCredit {
+    pub amount: i128,
+    pub recipient: soroban_sdk::Address,
+}
 #[soroban_sdk::contracterror]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ContractError {
@@ -65,7 +70,6 @@ pub enum ContractError {
     NewBlockHashEmpty = 11,
     OldBlockHashMismatch = 12,
     BlockHashUnchanged = 13,
-    ArrayLengthMismatch = 14,
     ArrayLengthExceedsLimit = 15,
     WithdrawalSumMismatch = 16,
     InsufficientBalance = 17,
