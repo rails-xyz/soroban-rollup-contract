@@ -43,6 +43,14 @@ pub enum DataKey {
     TotalWithdrawable,
 }
 
+/// Withdrawal allowance credited to one recipient in a rollup block.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawalCredit {
+    pub recipient: Address,
+    pub amount: i128,
+}
+
 /// Errors returned by the rollup contract.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -55,7 +63,6 @@ pub enum ContractError {
     NewBlockHashEmpty = 11,
     OldBlockHashMismatch = 12,
     BlockHashUnchanged = 13,
-    ArrayLengthMismatch = 14,
     ArrayLengthExceedsLimit = 15,
     WithdrawalSumMismatch = 16,
     InsufficientBalance = 17,
@@ -220,10 +227,8 @@ impl RollupContract {
     /// * `env` - Access to the Soroban environment.
     /// * `old_block_hash` - Expected current block hash.
     /// * `new_block_hash` - New block hash to commit.
-    /// * `new_withdrawal_addresses` - Addresses receiving newly posted
+    /// * `new_withdrawal_credits` - Recipients and amounts of the newly posted
     ///   withdrawal allowances.
-    /// * `new_withdrawal_amounts` - Amounts paired by index with
-    ///   `new_withdrawal_addresses`.
     /// * `new_withdrawal_sum` - Sum of all new withdrawal amounts.
     /// * `new_fees` - Fees accrued in the new rollup block.
     ///
@@ -234,19 +239,17 @@ impl RollupContract {
     ///   match the currently stored block hash.
     /// * [`ContractError::BlockHashUnchanged`] - If the new block hash is equal
     ///   to the old block hash.
-    /// * [`ContractError::ArrayLengthMismatch`] - If the address and amount
-    ///   arrays have different lengths.
     /// * [`ContractError::ArrayLengthExceedsLimit`] - If more than 100
-    ///   withdrawal entries are posted.
+    ///   withdrawal credits are posted.
     /// * [`ContractError::WithdrawalSumMismatch`] - If the provided
     ///   `new_withdrawal_sum` does not match the calculated total.
     /// * [`ContractError::InsufficientBalance`] - If the contract balance
     ///   cannot support the new withdrawable amount plus fees.
     /// * [`ContractError::FeesMustBeNonNegative`] - If `new_fees < 0`.
-    /// * [`ContractError::WithdrawalAmountMustBeNonNegative`] - If any entry in
-    ///   `new_withdrawal_amounts` is negative.
-    /// * [`ContractError::WithdrawalAddressIsContract`] - If any entry in
-    ///   `new_withdrawal_addresses` is the address of this contract.
+    /// * [`ContractError::WithdrawalAmountMustBeNonNegative`] - If the amount
+    ///   of any credit is negative.
+    /// * [`ContractError::WithdrawalAddressIsContract`] - If the recipient of
+    ///   any credit is the address of this contract.
     /// * [`ContractError::ArithmeticOverflow`] - If any balance, fee, or
     ///   allowance accumulation overflows.
     ///
@@ -263,8 +266,7 @@ impl RollupContract {
         env: Env,
         old_block_hash: BytesN<32>,
         new_block_hash: BytesN<32>,
-        new_withdrawal_addresses: Vec<Address>,
-        new_withdrawal_amounts: Vec<i128>,
+        new_withdrawal_credits: Vec<WithdrawalCredit>,
         new_withdrawal_sum: i128,
         new_fees: i128,
     ) -> Result<(), ContractError> {
@@ -286,29 +288,24 @@ impl RollupContract {
         if new_block_hash == old_block_hash {
             return Err(ContractError::BlockHashUnchanged);
         }
-        if new_withdrawal_addresses.len() != new_withdrawal_amounts.len() {
-            return Err(ContractError::ArrayLengthMismatch);
-        }
-        if new_withdrawal_addresses.len() > 100 {
+        if new_withdrawal_credits.len() > 100 {
             return Err(ContractError::ArrayLengthExceedsLimit);
         }
 
         let contract_address = env.current_contract_address();
         let mut calculated_withdrawal_sum = 0i128;
-        for i in 0..new_withdrawal_addresses.len() {
-            let user = &new_withdrawal_addresses.get(i).unwrap();
-            if *user == contract_address {
+        for credit in new_withdrawal_credits.iter() {
+            if credit.recipient == contract_address {
                 return Err(ContractError::WithdrawalAddressIsContract);
             }
-            let allowance = new_withdrawal_amounts.get(i).unwrap();
-            if allowance < 0 {
+            if credit.amount < 0 {
                 return Err(ContractError::WithdrawalAmountMustBeNonNegative);
             }
-            let key = DataKey::WithdrawalAllowances(user.clone());
+            let key = DataKey::WithdrawalAllowances(credit.recipient);
             let current = env.storage().persistent().get(&key).unwrap_or(0i128);
-            let updated = checked_add(current, allowance)?;
+            let updated = checked_add(current, credit.amount)?;
             if updated > 0 {
-                if allowance > 0 {
+                if credit.amount > 0 {
                     env.storage().persistent().set(&key, &updated);
                 }
                 env.storage().persistent().extend_ttl(
@@ -317,7 +314,7 @@ impl RollupContract {
                     PERSISTENT_BUMP_AMOUNT,
                 );
             }
-            calculated_withdrawal_sum = checked_add(calculated_withdrawal_sum, allowance)?;
+            calculated_withdrawal_sum = checked_add(calculated_withdrawal_sum, credit.amount)?;
         }
         if calculated_withdrawal_sum != new_withdrawal_sum {
             return Err(ContractError::WithdrawalSumMismatch);

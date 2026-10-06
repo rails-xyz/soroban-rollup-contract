@@ -38,7 +38,7 @@ Read-only functions: `owner`, `latest_block_hash`, `block_height`, `withdrawal_a
 
 - `new_block_hash` is not the zero hash and differs from `old_block_hash`.
 - `old_block_hash` matches the currently stored block hash.
-- The address and amount arrays have equal length, and hold at most 100 entries.
+- The withdrawal credits hold at most 100 entries.
 - Every posted amount is non-negative, and `new_fees` is non-negative.
 - No withdrawal address is the rollup contract's own address.
 - The posted amounts add up to `new_withdrawal_sum`.
