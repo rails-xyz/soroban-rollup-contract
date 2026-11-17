@@ -8,6 +8,10 @@ target
 # Certora local run artifacts
 .certora_internal/
 
+# TypeScript bindings build output
+bindings/ts/*/node_modules/
+bindings/ts/*/dist/
+
 # Codegraph
 .codegraph/
 .treehouse/

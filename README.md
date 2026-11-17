@@ -27,4 +27,15 @@ cargo test
 cargo check
 ```
 
-Generated client bindings live in [bindings](./bindings).
+## Client Bindings
+
+Generated client bindings live in [bindings](./bindings):
+
+- Rust: `bindings/<contract>.rs`
+- TypeScript: `bindings/ts/<contract>/`
+
+Regenerate all bindings after a change to a contract interface, then commit the result:
+
+```bash
+make bindings
+```
