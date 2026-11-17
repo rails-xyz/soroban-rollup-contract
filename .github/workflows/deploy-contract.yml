@@ -1,0 +1,329 @@
+name: Deploy Contract
+run-name: ${{ inputs.operation }} ${{ inputs.contract }} on ${{ inputs.environment }}
+
+# Builds one contract Wasm without access to secrets. A second job, bound to the
+# selected GitHub environment, then uploads or deploys that Wasm with the shared
+# deployer wallet. Each environment holds its network configuration:
+#   secrets.STELLAR_DEPLOYER_SECRET_KEY  Deployer secret key (S...). Pays all fees.
+#   secrets.STELLAR_RPC_URL              Stellar RPC endpoint.
+#   vars.STELLAR_NETWORK_PASSPHRASE      Network passphrase.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub environment (network)
+        required: true
+        type: choice
+        default: testnet
+        options:
+          - testnet
+          - mainnet
+      contract:
+        description: Contract package
+        required: true
+        type: choice
+        options:
+          - rollup-contract
+          - managed-liquidity-vault
+      operation:
+        description: "deploy: create a new instance. upload: install the Wasm and output its hash for an owner-signed upgrade."
+        required: true
+        type: choice
+        options:
+          - deploy
+          - upload
+      inclusion_fee:
+        description: Maximum inclusion fee per transaction, in stroops
+        required: true
+        type: string
+        default: "100"
+      collateral_token:
+        description: "rollup-contract deploy only: collateral token contract ID (C...)"
+        required: false
+        type: string
+      owner:
+        description: "rollup-contract deploy only: owner address (G... or C...)"
+        required: false
+        type: string
+      xlm_token:
+        description: "managed-liquidity-vault deploy only: principal (XLM) token contract ID (C...)"
+        required: false
+        type: string
+      yield_token:
+        description: "managed-liquidity-vault deploy only: yield (USDT0) token contract ID (C...)"
+        required: false
+        type: string
+      exchange:
+        description: "managed-liquidity-vault deploy only: exchange address (G... or C...)"
+        required: false
+        type: string
+      funding_partner:
+        description: "managed-liquidity-vault deploy only: funding partner address (G... or C...)"
+        required: false
+        type: string
+
+# All runs on one environment share one deployer account. Run them one at a
+# time so that transaction sequence numbers do not collide.
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The stellar-cli action cannot read its version from a SHA pin. Keep this
+  # value equal to the tag in the comments of the `stellar/stellar-cli` lines.
+  STELLAR_CLI_VERSION: 30.0.1
+
+jobs:
+  build:
+    name: Build ${{ inputs.contract }}
+    runs-on: ubuntu-latest
+    outputs:
+      wasm_file: ${{ steps.build.outputs.wasm_file }}
+      wasm_hash: ${{ steps.build.outputs.wasm_hash }}
+    steps:
+      - name: Validate inputs
+        env:
+          CONTRACT: ${{ inputs.contract }}
+          OPERATION: ${{ inputs.operation }}
+          INCLUSION_FEE: ${{ inputs.inclusion_fee }}
+          COLLATERAL_TOKEN: ${{ inputs.collateral_token }}
+          OWNER: ${{ inputs.owner }}
+          XLM_TOKEN: ${{ inputs.xlm_token }}
+          YIELD_TOKEN: ${{ inputs.yield_token }}
+          EXCHANGE: ${{ inputs.exchange }}
+          FUNDING_PARTNER: ${{ inputs.funding_partner }}
+        run: |
+          contract_id_pattern='^C[A-Z2-7]{55}$'
+          address_pattern='^[GC][A-Z2-7]{55}$'
+          errors=0
+          fail() {
+            echo "::error::$1"
+            errors=1
+          }
+          require_contract_id() {
+            [[ "$2" =~ $contract_id_pattern ]] || fail "$1 must be a contract ID (C...) for $OPERATION of $CONTRACT."
+          }
+          require_address() {
+            [[ "$2" =~ $address_pattern ]] || fail "$1 must be an address (G... or C...) for $OPERATION of $CONTRACT."
+          }
+          require_empty() {
+            [[ -z "$2" ]] || fail "$1 must be empty for $OPERATION of $CONTRACT."
+          }
+
+          [[ "$INCLUSION_FEE" =~ ^[1-9][0-9]*$ ]] || fail "inclusion_fee must be a positive integer."
+
+          case "$OPERATION/$CONTRACT" in
+            deploy/rollup-contract)
+              require_contract_id collateral_token "$COLLATERAL_TOKEN"
+              require_address owner "$OWNER"
+              require_empty xlm_token "$XLM_TOKEN"
+              require_empty yield_token "$YIELD_TOKEN"
+              require_empty exchange "$EXCHANGE"
+              require_empty funding_partner "$FUNDING_PARTNER"
+              ;;
+            deploy/managed-liquidity-vault)
+              require_contract_id xlm_token "$XLM_TOKEN"
+              require_contract_id yield_token "$YIELD_TOKEN"
+              require_address exchange "$EXCHANGE"
+              require_address funding_partner "$FUNDING_PARTNER"
+              require_empty collateral_token "$COLLATERAL_TOKEN"
+              require_empty owner "$OWNER"
+              ;;
+            upload/*)
+              require_empty collateral_token "$COLLATERAL_TOKEN"
+              require_empty owner "$OWNER"
+              require_empty xlm_token "$XLM_TOKEN"
+              require_empty yield_token "$YIELD_TOKEN"
+              require_empty exchange "$EXCHANGE"
+              require_empty funding_partner "$FUNDING_PARTNER"
+              ;;
+            *)
+              fail "Unsupported operation $OPERATION for contract $CONTRACT."
+              ;;
+          esac
+
+          exit "$errors"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain from rust-toolchain.toml
+        run: rustup toolchain install
+
+      - name: Install stellar-cli
+        uses: stellar/stellar-cli@f2a7b74175c34585f3b30a1abf42a2d41cbcc390 # v30.0.1
+        with:
+          version: ${{ env.STELLAR_CLI_VERSION }}
+
+      - name: Build Wasm
+        id: build
+        env:
+          CONTRACT: ${{ inputs.contract }}
+        run: |
+          stellar contract build --package "$CONTRACT" --locked
+          wasm_file="${CONTRACT//-/_}.wasm"
+          wasm_hash="$(sha256sum "target/wasm32v1-none/release/$wasm_file" | cut -d ' ' -f 1)"
+          echo "wasm_file=$wasm_file" >> "$GITHUB_OUTPUT"
+          echo "wasm_hash=$wasm_hash" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Build"
+            echo "| Field | Value |"
+            echo "| :--- | :--- |"
+            echo "| Contract | \`$CONTRACT\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+            echo "| Wasm file | \`$wasm_file\` |"
+            echo "| Wasm hash (SHA-256) | \`$wasm_hash\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Wasm artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wasm
+          path: target/wasm32v1-none/release/${{ steps.build.outputs.wasm_file }}
+          if-no-files-found: error
+          # A re-run of all jobs uploads the artifact again under the same name.
+          overwrite: true
+
+  release:
+    name: ${{ inputs.operation }} on ${{ inputs.environment }}
+    needs: build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Install stellar-cli
+        uses: stellar/stellar-cli@f2a7b74175c34585f3b30a1abf42a2d41cbcc390 # v30.0.1
+        with:
+          version: ${{ env.STELLAR_CLI_VERSION }}
+
+      - name: Download Wasm artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wasm
+          path: wasm
+
+      - name: Verify Wasm hash
+        env:
+          WASM_FILE: ${{ needs.build.outputs.wasm_file }}
+          WASM_HASH: ${{ needs.build.outputs.wasm_hash }}
+        run: echo "$WASM_HASH  wasm/$WASM_FILE" | sha256sum --check --strict
+
+      - name: Check environment configuration
+        id: deployer
+        env:
+          STELLAR_ACCOUNT: ${{ secrets.STELLAR_DEPLOYER_SECRET_KEY }}
+          STELLAR_RPC_URL: ${{ secrets.STELLAR_RPC_URL }}
+          STELLAR_NETWORK_PASSPHRASE: ${{ vars.STELLAR_NETWORK_PASSPHRASE }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          missing=0
+          if [[ -z "$STELLAR_ACCOUNT" ]]; then
+            echo "::error::Secret STELLAR_DEPLOYER_SECRET_KEY is not set in environment $ENVIRONMENT."
+            missing=1
+          fi
+          if [[ -z "$STELLAR_RPC_URL" ]]; then
+            echo "::error::Secret STELLAR_RPC_URL is not set in environment $ENVIRONMENT."
+            missing=1
+          fi
+          if [[ -z "$STELLAR_NETWORK_PASSPHRASE" ]]; then
+            echo "::error::Variable STELLAR_NETWORK_PASSPHRASE is not set in environment $ENVIRONMENT."
+            missing=1
+          fi
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+          # A failed command substitution inside `echo` does not stop the step, so assign first.
+          address="$(stellar keys public-key "$STELLAR_ACCOUNT")"
+          echo "address=$address" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Wasm
+        if: inputs.operation == 'upload'
+        env:
+          STELLAR_ACCOUNT: ${{ secrets.STELLAR_DEPLOYER_SECRET_KEY }}
+          STELLAR_RPC_URL: ${{ secrets.STELLAR_RPC_URL }}
+          STELLAR_NETWORK_PASSPHRASE: ${{ vars.STELLAR_NETWORK_PASSPHRASE }}
+          STELLAR_INCLUSION_FEE: ${{ inputs.inclusion_fee }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          CONTRACT: ${{ inputs.contract }}
+          DEPLOYER: ${{ steps.deployer.outputs.address }}
+          WASM_FILE: ${{ needs.build.outputs.wasm_file }}
+          WASM_HASH: ${{ needs.build.outputs.wasm_hash }}
+        run: |
+          uploaded_hash="$(stellar contract upload --wasm "wasm/$WASM_FILE")"
+          if [[ "$uploaded_hash" != "$WASM_HASH" ]]; then
+            echo "::error::stellar contract upload returned hash $uploaded_hash, but the built Wasm hash is $WASM_HASH."
+            exit 1
+          fi
+          {
+            echo "### Uploaded"
+            echo "| Field | Value |"
+            echo "| :--- | :--- |"
+            echo "| Environment | \`$ENVIRONMENT\` |"
+            echo "| Contract | \`$CONTRACT\` |"
+            echo "| Wasm hash | \`$WASM_HASH\` |"
+            echo "| Deployer | \`$DEPLOYER\` |"
+            echo
+            echo "The upgrade operator (rollup-contract: owner, managed-liquidity-vault: exchange) completes the upgrade:"
+            echo
+            echo '```'
+            echo "stellar contract invoke --id <contract-id> --source-account <operator> -- upgrade --new_wasm_hash $WASM_HASH --operator <operator>"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy contract
+        if: inputs.operation == 'deploy'
+        env:
+          STELLAR_ACCOUNT: ${{ secrets.STELLAR_DEPLOYER_SECRET_KEY }}
+          STELLAR_RPC_URL: ${{ secrets.STELLAR_RPC_URL }}
+          STELLAR_NETWORK_PASSPHRASE: ${{ vars.STELLAR_NETWORK_PASSPHRASE }}
+          STELLAR_INCLUSION_FEE: ${{ inputs.inclusion_fee }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          CONTRACT: ${{ inputs.contract }}
+          DEPLOYER: ${{ steps.deployer.outputs.address }}
+          WASM_FILE: ${{ needs.build.outputs.wasm_file }}
+          WASM_HASH: ${{ needs.build.outputs.wasm_hash }}
+          COLLATERAL_TOKEN: ${{ inputs.collateral_token }}
+          OWNER: ${{ inputs.owner }}
+          XLM_TOKEN: ${{ inputs.xlm_token }}
+          YIELD_TOKEN: ${{ inputs.yield_token }}
+          EXCHANGE: ${{ inputs.exchange }}
+          FUNDING_PARTNER: ${{ inputs.funding_partner }}
+        run: |
+          case "$CONTRACT" in
+            rollup-contract)
+              constructor_args=(--collateral_token "$COLLATERAL_TOKEN" --owner "$OWNER")
+              ;;
+            managed-liquidity-vault)
+              constructor_args=(--xlm_token "$XLM_TOKEN" --yield_token "$YIELD_TOKEN" --exchange "$EXCHANGE" --funding_partner "$FUNDING_PARTNER")
+              ;;
+            *)
+              echo "::error::Unsupported contract $CONTRACT."
+              exit 1
+              ;;
+          esac
+
+          contract_id="$(stellar contract deploy --wasm "wasm/$WASM_FILE" -- "${constructor_args[@]}")"
+          if [[ ! "$contract_id" =~ ^C[A-Z2-7]{55}$ ]]; then
+            echo "::error::stellar contract deploy returned an unexpected contract ID: $contract_id"
+            exit 1
+          fi
+          {
+            echo "### Deployed"
+            echo "| Field | Value |"
+            echo "| :--- | :--- |"
+            echo "| Environment | \`$ENVIRONMENT\` |"
+            echo "| Contract | \`$CONTRACT\` |"
+            echo "| Contract ID | \`$contract_id\` |"
+            echo "| Wasm hash | \`$WASM_HASH\` |"
+            echo "| Deployer | \`$DEPLOYER\` |"
+            echo "| Constructor arguments | \`${constructor_args[*]}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
