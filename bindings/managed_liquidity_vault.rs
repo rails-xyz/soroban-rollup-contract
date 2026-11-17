@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/managed_liquidity_vault.wasm", sha256 =
-    "b8adb410091b7440cae657712a6930765bec97df57aab5de25ea1ed35b3b4b09"
+    "364c01ac3fd2656414155beaa345a3f577e1f61695f0228525d46ee0cc2cf7d6"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]

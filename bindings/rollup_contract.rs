@@ -1,6 +1,6 @@
 pub const WASM: &[u8] = soroban_sdk::contractfile!(
     file = "./target/wasm32v1-none/release/rollup_contract.wasm", sha256 =
-    "64d4551dcd3dfe17e0bd5021bc2ce99c353d50689d44768b97eb25a59046dae4"
+    "6450987714efa9236b812fd6b70ce778ad88600c89a1c2baf0d9219f0d0e5dc1"
 );
 #[soroban_sdk::contractargs(name = "Args")]
 #[soroban_sdk::contractclient(name = "Client")]
@@ -100,14 +100,18 @@ pub enum OwnableError {
     TransferInProgress = 2101,
     OwnerAlreadySet = 2102,
 }
-#[soroban_sdk::contractevent(topics = ["ownership_transfer"])]
+#[soroban_sdk::contractevent(topics = ["ownership_transfer"], data_format = "map")]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OwnershipTransfer {
     pub old_owner: soroban_sdk::Address,
     pub new_owner: soroban_sdk::Address,
     pub live_until_ledger: u32,
 }
-#[soroban_sdk::contractevent(topics = ["ownership_transfer_completed"])]
+#[soroban_sdk::contractevent(
+    topics = ["ownership_transfer_completed",
+    ],
+    data_format = "map"
+)]
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OwnershipTransferCompleted {
     pub new_owner: soroban_sdk::Address,
