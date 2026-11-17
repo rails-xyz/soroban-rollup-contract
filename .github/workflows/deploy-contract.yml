@@ -15,10 +15,10 @@ on:
         description: GitHub environment (network)
         required: true
         type: choice
-        default: staging
+        default: testnet
         options:
-          - staging
-          - ex-prod
+          - testnet
+          - mainnet
       contract:
         description: Contract package
         required: true
